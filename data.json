@@ -6,7 +6,7 @@
       "slot": "Mattina",
       "field": "Budrio",
       "title": "Introduzione ai principi del modello di gioco",
-      "image": "assets/AL_001.png",
+      "image": "AL_001.png",
       "tags": [
         "Creare il vantaggio",
         "Uomo libero",
@@ -19,7 +19,7 @@
       "slot": "Pomeriggio",
       "field": "Budrio",
       "title": "Creare e conservare il vantaggio in costruzione",
-      "image": "assets/AL_002.png",
+      "image": "AL_002.png",
       "tags": [
         "Costruzione",
         "Superiorità",
@@ -31,12 +31,12 @@
       "date": "2026-07-26",
       "slot": "Pomeriggio",
       "field": "Budrio",
-      "title": "Test aerobico massimale",
-      "image": "assets/AL_003.png",
+      "title": "Creare e conservare il vantaggio in costruzione",
+      "image": "AL_003.png",
       "tags": [
-        "Metabolico",
-        "Test aerobico",
-        "Core"
+        "Costruzione",
+        "Superiorità",
+        "Doppio pivot"
       ]
     },
     {
@@ -45,7 +45,7 @@
       "slot": "Pomeriggio",
       "field": "Mezzolara",
       "title": "Costruzione centrale, doppio pivot e terzo uomo",
-      "image": "assets/AL_004.png",
+      "image": "AL_004.png",
       "tags": [
         "Terzo uomo",
         "Metabolico",
@@ -58,7 +58,7 @@
       "slot": "Pomeriggio",
       "field": "Mezzolara",
       "title": "Costruzione 3+2, possesso e forza",
-      "image": "assets/AL_005.png",
+      "image": "AL_005.png",
       "tags": [
         "3+2",
         "Possesso",
@@ -84,21 +84,21 @@
     {
       "date": "2026-07-26",
       "type": "training",
-      "title": "AL_003 · Allenamento",
+      "title": "AL_003 · Allenamento pomeriggio",
       "time": "17:30",
       "sheet": "AL_003"
     },
     {
       "date": "2026-07-27",
       "type": "training",
-      "title": "AL_004 · Allenamento",
+      "title": "AL_004 · Allenamento pomeriggio",
       "time": "17:30",
       "sheet": "AL_004"
     },
     {
       "date": "2026-07-28",
       "type": "training",
-      "title": "AL_005 · Allenamento",
+      "title": "AL_005 · Allenamento pomeriggio",
       "time": "17:30",
       "sheet": "AL_005"
     },
