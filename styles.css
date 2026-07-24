@@ -6,6 +6,7 @@
   --line:#dce3ee;
   --muted:#667085;
   --text:#111827;
+  --sidebar-width:250px;
 }
 
 *{
@@ -58,13 +59,12 @@ button{
   min-height:100vh;
   display:grid;
   grid-template-columns:minmax(0,1.1fr) minmax(420px,.9fr);
-  background:
-    linear-gradient(
-      130deg,
-      var(--navy),
-      #103cae 72%,
-      var(--cyan)
-    );
+  background:linear-gradient(
+    130deg,
+    var(--navy),
+    #103cae 72%,
+    var(--cyan)
+  );
 }
 
 .login-brand{
@@ -197,26 +197,33 @@ button{
   top:0;
   bottom:0;
   left:0;
-  width:270px;
+  width:var(--sidebar-width);
   display:flex;
   flex-direction:column;
-  padding:22px 18px;
+  padding:20px 16px;
   overflow-y:auto;
+  overflow-x:hidden;
   background:var(--navy);
   color:#fff;
+  scrollbar-width:none;
+}
+
+.sidebar::-webkit-scrollbar{
+  display:none;
 }
 
 .brand{
   display:flex;
   align-items:center;
-  gap:12px;
-  padding-bottom:18px;
+  gap:11px;
+  padding-bottom:17px;
   border-bottom:1px solid rgba(255,255,255,.13);
 }
 
 .brand strong{
   display:block;
-  font-size:17px;
+  font-size:16px;
+  white-space:nowrap;
 }
 
 .club-card{
@@ -224,18 +231,18 @@ button{
   align-items:center;
   gap:10px;
   margin:18px 0;
-  padding:12px;
+  padding:11px;
   border:1px solid rgba(255,255,255,.14);
   border-radius:14px;
   background:rgba(255,255,255,.05);
 }
 
 .club-card img{
-  width:44px;
-  height:44px;
+  width:42px;
+  height:42px;
   flex-shrink:0;
   object-fit:contain;
-  border-radius:10px;
+  border-radius:9px;
   background:#fff;
 }
 
@@ -270,7 +277,7 @@ nav{
   width:100%;
   border:0;
   border-radius:10px;
-  padding:12px 14px;
+  padding:12px 13px;
   background:transparent;
   color:#ccd6e9;
   text-align:left;
@@ -289,21 +296,23 @@ nav{
 }
 
 main{
+  width:calc(100% - var(--sidebar-width));
   min-width:0;
   min-height:100vh;
-  margin-left:270px;
+  margin-left:var(--sidebar-width);
 }
 
 .topbar{
   position:sticky;
   z-index:20;
   top:0;
-  min-height:92px;
+  width:100%;
+  min-height:88px;
   display:flex;
   align-items:center;
   justify-content:space-between;
   gap:20px;
-  padding:18px 34px;
+  padding:16px 28px;
   border-bottom:1px solid var(--line);
   background:#fff;
 }
@@ -311,6 +320,7 @@ main{
 .topbar h1{
   margin:0;
   color:var(--navy);
+  font-size:31px;
 }
 
 .top-actions{
@@ -356,7 +366,7 @@ main{
   display:none;
   width:100%;
   max-width:100%;
-  padding:32px 32px 50px;
+  padding:28px 22px 44px;
 }
 
 .view.active{
@@ -364,17 +374,18 @@ main{
 }
 
 .page-head{
+  width:100%;
   display:flex;
   align-items:flex-end;
   justify-content:space-between;
   gap:20px;
-  margin-bottom:20px;
+  margin-bottom:18px;
 }
 
 .page-head h2{
-  margin:0 0 6px;
+  margin:0 0 5px;
   color:var(--navy);
-  font-size:30px;
+  font-size:29px;
 }
 
 .page-head p:last-child{
@@ -385,7 +396,8 @@ main{
 .legend{
   display:flex;
   flex-wrap:wrap;
-  gap:14px;
+  justify-content:flex-end;
+  gap:13px;
 }
 
 .legend span{
@@ -424,29 +436,33 @@ main{
 .calendar-scroll{
   width:100%;
   max-width:100%;
+  margin:0 auto;
+  overflow:visible;
 }
 
 .calendar-shell{
   width:100%;
   max-width:100%;
+  margin:0 auto;
   overflow:hidden;
   border:1px solid var(--line);
-  border-radius:18px;
+  border-radius:17px;
   background:#fff;
 }
 
 .cal-head{
+  width:100%;
   display:flex;
   align-items:center;
   justify-content:center;
   gap:20px;
-  padding:18px;
+  padding:16px;
   border-bottom:1px solid var(--line);
 }
 
 .cal-head button{
-  width:36px;
-  height:36px;
+  width:34px;
+  height:34px;
   flex-shrink:0;
   border:0;
   border-radius:9px;
@@ -454,7 +470,7 @@ main{
 }
 
 .cal-head strong{
-  min-width:170px;
+  min-width:165px;
   color:var(--navy);
   text-align:center;
 }
@@ -462,13 +478,14 @@ main{
 .weekdays,
 .calendar-grid{
   width:100%;
+  max-width:100%;
   display:grid;
   grid-template-columns:repeat(7,minmax(0,1fr));
 }
 
 .weekdays span{
   min-width:0;
-  padding:12px 5px;
+  padding:11px 4px;
   border-bottom:1px solid var(--line);
   color:var(--muted);
   font-size:10px;
@@ -478,10 +495,11 @@ main{
 
 .day{
   position:relative;
+  width:100%;
   min-width:0;
-  min-height:130px;
+  min-height:112px;
   overflow:hidden;
-  padding:10px;
+  padding:9px;
   border-right:1px solid var(--line);
   border-bottom:1px solid var(--line);
   background:#fff;
@@ -505,8 +523,8 @@ main{
 .day.has-training::after{
   content:"";
   position:absolute;
-  top:10px;
-  right:10px;
+  top:9px;
+  right:9px;
   width:8px;
   height:8px;
   border-radius:50%;
@@ -517,11 +535,11 @@ main{
   display:block;
   width:100%;
   max-width:100%;
-  margin-top:7px;
+  margin-top:6px;
   overflow:hidden;
-  padding:7px;
+  padding:6px;
   border-radius:7px;
-  font-size:10px;
+  font-size:9px;
   font-weight:800;
   white-space:nowrap;
   text-overflow:ellipsis;
@@ -673,7 +691,7 @@ main{
 
 .placeholder.active{
   display:grid;
-  min-height:calc(100vh - 92px);
+  min-height:calc(100vh - 88px);
   place-items:center;
 }
 
@@ -783,12 +801,28 @@ dialog::backdrop{
 }
 
 
-/* TABLET */
+/* SCHERMI DESKTOP PIÙ PICCOLI */
 
-@media(max-width:1200px){
+@media(max-width:1250px){
+
+  :root{
+    --sidebar-width:230px;
+  }
+
+  .sidebar{
+    padding:18px 14px;
+  }
+
+  .brand strong{
+    font-size:15px;
+  }
 
   .view{
-    padding:28px 24px 45px;
+    padding:24px 18px 40px;
+  }
+
+  .page-head h2{
+    font-size:28px;
   }
 
   .session-grid{
@@ -796,18 +830,18 @@ dialog::backdrop{
   }
 
   .day{
-    min-height:112px;
-    padding:8px;
+    min-height:102px;
+    padding:7px;
   }
 
   .event{
-    padding:6px;
-    font-size:9px;
+    padding:5px;
+    font-size:8px;
   }
 }
 
 
-/* SMARTPHONE E TABLET VERTICALI */
+/* TABLET E SMARTPHONE */
 
 @media(max-width:900px){
 
@@ -918,6 +952,7 @@ dialog::backdrop{
   }
 
   .legend{
+    justify-content:flex-start;
     margin-top:18px;
   }
 
@@ -967,13 +1002,12 @@ dialog::backdrop{
 @media(max-width:600px){
 
   .login-screen{
-    background:
-      linear-gradient(
-        160deg,
-        var(--navy),
-        #103cae 72%,
-        var(--cyan)
-      );
+    background:linear-gradient(
+      160deg,
+      var(--navy),
+      #103cae 72%,
+      var(--cyan)
+    );
   }
 
   .login-brand{
