@@ -1,12 +1,47 @@
 import { icon } from './icons.js'
+import { supabase } from '../supabase.js'
+
 import {
   dashboardStats,
   todayItems,
   recentActivity,
   players,
   analysisItems,
-  calendarEvents,
 } from '../data/appData.js'
+
+let calendarEvents = []
+
+async function loadCalendarEvents() {
+  const { data, error } = await supabase
+    .from('events')
+    .select('*')
+    .order('start_at')
+
+  if (error) {
+    alert(`Errore Supabase: ${error.message}`)
+    return
+  }
+
+  if (error) {
+  alert(`Errore Supabase: ${error.message}`)
+  return
+}
+
+  calendarEvents = data.map(event => ({
+    day: new Date(event.start_at).getDate(),
+    title: event.title,
+    time: new Date(event.start_at).toLocaleTimeString('it-IT', {
+      hour: '2-digit',
+      minute: '2-digit',
+    }),
+    place: event.location,
+    type: event.event_type,
+    intensity: event.intensity,
+    volume: event.volume,
+    present: '-',
+    sheet: '-',
+  }))
+}
 
 const menu = [
   ['dashboard', 'Dashboard'],
@@ -41,7 +76,9 @@ function statCards() {
     .map(
       (item) => `
         <article class="stat-card">
-          <div class="stat-icon">${icon(item.icon)}</div>
+          <div class="stat-icon">
+            ${icon(item.icon)}
+          </div>
 
           <div>
             <span>${item.label}</span>
@@ -269,9 +306,17 @@ function calendarView() {
           <h2>Luglio 2026</h2>
 
           <div>
-            <button class="is-active" type="button">Mese</button>
-            <button type="button">Settimana</button>
-            <button type="button">Agenda</button>
+            <button class="is-active" type="button">
+              Mese
+            </button>
+
+            <button type="button">
+              Settimana
+            </button>
+
+            <button type="button">
+              Agenda
+            </button>
           </div>
         </div>
 
@@ -420,6 +465,33 @@ function placeholderView(title) {
   `
 }
 
+function profileView() {
+  return `
+    <section class="view page-view">
+      <div class="page-head">
+        <div>
+          <h1>Profilo</h1>
+
+          <p>
+            <span>ACCOUNT PERSONALE</span>
+            <b>•</b>
+            Nicola Zecchi
+          </p>
+        </div>
+      </div>
+
+      <div class="placeholder-panel">
+        <h2>Nicola Zecchi</h2>
+
+        <p>
+          Qui potrai gestire i dati personali, il ruolo nello staff,
+          la foto profilo e le preferenze dell’account.
+        </p>
+      </div>
+    </section>
+  `
+}
+
 function drawerHtml(event) {
   return `
     <div
@@ -434,7 +506,11 @@ function drawerHtml(event) {
           <h2>26 Luglio 2026</h2>
         </div>
 
-        <button type="button" data-close-drawer>
+        <button
+          type="button"
+          data-close-drawer
+          aria-label="Chiudi"
+        >
           ${icon('close')}
         </button>
       </div>
@@ -476,7 +552,9 @@ function drawerHtml(event) {
       </div>
 
       <div class="drawer-actions">
-        <button type="button">Carica PNG</button>
+        <button type="button">
+          Carica PNG
+        </button>
 
         <button class="primary-action" type="button">
           Salva modifiche
@@ -486,45 +564,110 @@ function drawerHtml(event) {
   `
 }
 
-export function renderApp(user) {
-  const isMobile = window.innerWidth <= 768
-
-  const userInitial =
-    user.email?.charAt(0).toUpperCase() ?? 'N'
-
-  const mobileLogoutButton = isMobile
-    ? `
+function profileMenuHtml(userInitial, userEmail) {
+  return `
+    <div class="profile-menu-wrapper">
       <button
-        id="mobileLogoutButton"
+        id="profileMenuButton"
+        class="profile-menu-button"
         type="button"
-        aria-label="Esci"
-        style="
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          gap: 8px;
-          min-height: 42px;
-          padding: 0 14px;
-          border: 1px solid rgba(255, 255, 255, 0.14);
-          border-radius: 10px;
-          background: rgba(255, 255, 255, 0.05);
-          color: #ffffff;
-          font: inherit;
-          font-weight: 700;
-          cursor: pointer;
-        "
+        aria-expanded="false"
+        aria-controls="profileDropdown"
+        aria-label="Apri menu profilo"
       >
-        ${icon('logout')}
-        <span>Esci</span>
+        <span class="user-avatar">
+          ${userInitial}
+        </span>
+
+        <span class="profile-menu-identity">
+          <strong>Nicola Zecchi</strong>
+          <small>Staff</small>
+        </span>
+
+        <span
+          class="profile-menu-chevron"
+          aria-hidden="true"
+        >
+          ⌄
+        </span>
       </button>
-    `
-    : ''
+
+      <div
+        id="profileDropdown"
+        class="profile-dropdown"
+        role="menu"
+        aria-hidden="true"
+      >
+        <div class="profile-dropdown-head">
+          <span class="profile-dropdown-avatar">
+            ${userInitial}
+          </span>
+
+          <div>
+            <strong>Nicola Zecchi</strong>
+            <span>${userEmail}</span>
+          </div>
+        </div>
+
+        <div class="profile-dropdown-separator"></div>
+
+        <button
+          class="profile-dropdown-item"
+          type="button"
+          data-profile-action="profile"
+          role="menuitem"
+        >
+          <span class="profile-dropdown-icon">
+            ${icon('squad')}
+          </span>
+
+          <span>Profilo</span>
+        </button>
+
+        <button
+          class="profile-dropdown-item"
+          type="button"
+          data-profile-action="settings"
+          role="menuitem"
+        >
+          <span class="profile-dropdown-icon">
+            ${icon('settings')}
+          </span>
+
+          <span>Impostazioni</span>
+        </button>
+
+        <div class="profile-dropdown-separator"></div>
+
+        <button
+          class="profile-dropdown-item profile-dropdown-item--logout"
+          type="button"
+          data-profile-action="logout"
+          role="menuitem"
+        >
+          <span class="profile-dropdown-icon">
+            ${icon('logout')}
+          </span>
+
+          <span>Esci</span>
+        </button>
+      </div>
+    </div>
+  `
+}
+
+export function renderApp(user) {
+  const userEmail = user.email ?? ''
+  const userInitial =
+    userEmail.charAt(0).toUpperCase() || 'N'
 
   return `
     <div class="app-shell">
       <aside class="sidebar">
         <div class="sidebar-brand">
-          <div class="brand-square">NZ</div>
+          <div class="brand-square">
+            NZ
+          </div>
 
           <div>
             <strong>NICOLA ZECCHI</strong>
@@ -548,26 +691,18 @@ export function renderApp(user) {
 
       <div class="workspace">
         <header class="topbar">
-          <div></div>
+          <div class="mobile-topbar-brand">
+            <span class="mobile-brand-square">
+              NZ
+            </span>
 
-          <div
-            style="
-              display: flex;
-              align-items: center;
-              gap: 10px;
-            "
-          >
-            ${mobileLogoutButton}
-
-            <div class="user-menu">
-              <span class="user-avatar">
-                ${userInitial}
-              </span>
-
-              <strong>Nicola Zecchi</strong>
-              <span>⌄</span>
+            <div>
+              <strong>NZ</strong>
+              <span>Coach Portal</span>
             </div>
           </div>
+
+          ${profileMenuHtml(userInitial, userEmail)}
         </header>
 
         <main id="viewRoot">
@@ -580,30 +715,51 @@ export function renderApp(user) {
   `
 }
 
-export function attachAppEvents() {
+export async function attachAppEvents() {
+  await loadCalendarEvents()
+  
   const root = document.querySelector('#viewRoot')
   const drawerRoot = document.querySelector('#drawerRoot')
 
-  const desktopLogoutButton =
+  const logoutButton =
     document.querySelector('#logoutButton')
 
-  const mobileLogoutButton =
-    document.querySelector('#mobileLogoutButton')
+  const profileMenuButton =
+    document.querySelector('#profileMenuButton')
 
-  function setView(key, label) {
-    const views = {
-      dashboard: dashboardView,
-      calendar: calendarView,
-      squad: squadView,
-      analysis: analysisView,
-    }
+  const profileDropdown =
+    document.querySelector('#profileDropdown')
 
-    root.innerHTML = views[key]
-      ? views[key]()
-      : placeholderView(label)
-
-    bindDynamic()
+  function setActiveNavigation(sectionKey) {
+    document
+      .querySelectorAll('.nav-item')
+      .forEach((item) => {
+        item.classList.toggle(
+          'is-active',
+          item.dataset.section === sectionKey,
+        )
+      })
   }
+
+ async function setView(key, label) {
+  if (key === 'calendar') {
+    await loadCalendarEvents()
+  }
+
+  const views = {
+    dashboard: dashboardView,
+    calendar: calendarView,
+    squad: squadView,
+    analysis: analysisView,
+    profile: profileView,
+  }
+
+  root.innerHTML = views[key]
+    ? views[key]()
+    : placeholderView(label)
+
+  bindDynamic()
+}
 
   function openDrawer(day) {
     const event = calendarEvents.find(
@@ -630,6 +786,56 @@ export function attachAppEvents() {
     document.body.classList.remove('drawer-open')
   }
 
+  function openProfileMenu() {
+    if (!profileMenuButton || !profileDropdown) {
+      return
+    }
+
+    profileMenuButton.setAttribute(
+      'aria-expanded',
+      'true',
+    )
+
+    profileDropdown.setAttribute(
+      'aria-hidden',
+      'false',
+    )
+
+    profileDropdown.classList.add('is-open')
+    document.body.classList.add('profile-menu-open')
+  }
+
+  function closeProfileMenu() {
+    if (!profileMenuButton || !profileDropdown) {
+      return
+    }
+
+    profileMenuButton.setAttribute(
+      'aria-expanded',
+      'false',
+    )
+
+    profileDropdown.setAttribute(
+      'aria-hidden',
+      'true',
+    )
+
+    profileDropdown.classList.remove('is-open')
+    document.body.classList.remove('profile-menu-open')
+  }
+
+  function toggleProfileMenu() {
+    const isOpen =
+      profileDropdown?.classList.contains('is-open')
+
+    if (isOpen) {
+      closeProfileMenu()
+      return
+    }
+
+    openProfileMenu()
+  }
+
   function bindDynamic() {
     root
       .querySelectorAll('[data-open-event]')
@@ -643,24 +849,72 @@ export function attachAppEvents() {
   document
     .querySelectorAll('.nav-item')
     .forEach((button) => {
-      button.addEventListener('click', () => {
-        document
-          .querySelectorAll('.nav-item')
-          .forEach((item) => {
-            item.classList.remove('is-active')
-          })
+      button.addEventListener('click', async () => {
+        const sectionKey = button.dataset.section
+        const sectionLabel = button.textContent.trim()
 
-        button.classList.add('is-active')
-
-        setView(
-          button.dataset.section,
-          button.textContent.trim(),
-        )
+        setActiveNavigation(sectionKey)
+        await setView(sectionKey, sectionLabel)
+        closeProfileMenu()
       })
     })
 
-  mobileLogoutButton?.addEventListener('click', () => {
-    desktopLogoutButton?.click()
+  profileMenuButton?.addEventListener(
+    'click',
+    (event) => {
+      event.stopPropagation()
+      toggleProfileMenu()
+    },
+  )
+
+  profileDropdown?.addEventListener(
+    'click',
+    (event) => {
+      event.stopPropagation()
+    },
+  )
+
+  document
+    .querySelectorAll('[data-profile-action]')
+    .forEach((button) => {
+      button.addEventListener('click', async () => {
+        const action = button.dataset.profileAction
+
+        if (action === 'profile') {
+          setActiveNavigation('')
+          setView('profile', 'Profilo')
+          closeProfileMenu()
+          return
+        }
+
+        if (action === 'settings') {
+          setActiveNavigation('settings')
+          setView('settings', 'Impostazioni')
+          closeProfileMenu()
+          return
+        }
+
+        if (action === 'logout') {
+          closeProfileMenu()
+          logoutButton?.click()
+        }
+      })
+    })
+
+  document.addEventListener('click', (event) => {
+    const clickedInsideProfileMenu =
+      event.target.closest('.profile-menu-wrapper')
+
+    if (!clickedInsideProfileMenu) {
+      closeProfileMenu()
+    }
+  })
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      closeProfileMenu()
+      closeDrawer()
+    }
   })
 
   bindDynamic()
