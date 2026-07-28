@@ -1631,3 +1631,232 @@ svg {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* MODALE NUOVO EVENTO */
+
+.new-event-modal-open {
+  overflow: hidden;
+}
+
+.new-event-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(1, 7, 12, 0.74);
+  backdrop-filter: blur(5px);
+}
+
+.new-event-modal {
+  width: min(540px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: hidden;
+  border: 1px solid rgba(86, 139, 177, 0.28);
+  border-radius: 18px;
+  color: var(--text);
+  background:
+    linear-gradient(
+      160deg,
+      rgba(12, 31, 48, 0.99),
+      rgba(5, 17, 28, 0.99)
+    );
+  box-shadow:
+    0 28px 90px rgba(0, 0, 0, 0.58),
+    0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.new-event-modal__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid var(--soft);
+}
+
+.new-event-modal__head span {
+  color: var(--cyan);
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.new-event-modal__head h2 {
+  margin: 6px 0 0;
+  font-size: 1.55rem;
+  letter-spacing: -0.035em;
+}
+
+.new-event-modal__close {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  place-items: center;
+  padding: 9px;
+  border: 1px solid var(--soft);
+  border-radius: 10px;
+  color: #dce7ef;
+  background: rgba(255, 255, 255, 0.035);
+  cursor: pointer;
+}
+
+.new-event-modal__close:hover {
+  background: rgba(255, 255, 255, 0.075);
+}
+
+.new-event-modal__close svg {
+  width: 18px;
+  height: 18px;
+}
+
+.new-event-form {
+  display: grid;
+  gap: 16px;
+  max-height: calc(100vh - 150px);
+  padding: 22px 24px 24px;
+  overflow-y: auto;
+}
+
+.new-event-form label {
+  display: grid;
+  gap: 8px;
+  color: #edf5fa;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.new-event-form input,
+.new-event-form select {
+  width: 100%;
+  min-height: 46px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  outline: 0;
+  color: var(--text);
+  background: rgba(3, 13, 22, 0.72);
+}
+
+.new-event-form input:focus,
+.new-event-form select:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(22, 143, 233, 0.12);
+}
+
+.new-event-form input[type="file"] {
+  min-height: auto;
+  padding: 10px 12px;
+}
+
+.new-event-form input[type="file"]::file-selector-button {
+  margin-right: 12px;
+  padding: 8px 11px;
+  border: 0;
+  border-radius: 7px;
+  color: white;
+  background: rgba(22, 143, 233, 0.82);
+  cursor: pointer;
+}
+
+.new-event-form select option {
+  color: #111827;
+  background: white;
+}
+
+.new-event-form label small {
+  color: var(--muted);
+  font-size: 0.65rem;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.new-event-form__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.new-event-form__message {
+  min-height: 18px;
+  margin: -2px 0 0;
+  color: #ff9aa4;
+  font-size: 0.7rem;
+}
+
+.new-event-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.new-event-modal__actions button {
+  min-height: 42px;
+  padding: 0 16px;
+  border-radius: 9px;
+}
+
+.new-event-modal__secondary {
+  border: 1px solid var(--border);
+  color: #dce7ef;
+  background: rgba(255, 255, 255, 0.025);
+  cursor: pointer;
+}
+
+.new-event-modal__secondary:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+@media (max-width: 560px) {
+  .new-event-modal-backdrop {
+    align-items: end;
+    padding: 0;
+  }
+
+  .new-event-modal {
+    width: 100%;
+    max-height: 92vh;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 22px 22px 0 0;
+  }
+
+  .new-event-modal__head {
+    padding: 19px 18px 16px;
+  }
+
+  .new-event-modal__head h2 {
+    font-size: 1.35rem;
+  }
+
+  .new-event-form {
+    max-height: calc(92vh - 88px);
+    padding: 18px 18px 24px;
+  }
+
+  .new-event-form__row {
+    grid-template-columns: 1fr;
+  }
+
+  .new-event-modal__actions {
+    position: sticky;
+    bottom: -24px;
+    margin: 0 -18px -24px;
+    padding: 14px 18px 24px;
+    background:
+      linear-gradient(
+        180deg,
+        rgba(5, 17, 28, 0),
+        rgba(5, 17, 28, 0.99) 26%
+      );
+  }
+
+  .new-event-modal__actions button {
+    flex: 1;
+  }
+}

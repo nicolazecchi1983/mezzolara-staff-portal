@@ -503,7 +503,7 @@ function drawerHtml(event) {
     <aside class="event-drawer">
       <div class="drawer-head">
         <div>
-          <span>ALLENAMENTO</span>
+          <span>${event.title.toUpperCase()}</span>
           <h2>${new Date(event.startAt).toLocaleDateString('it-IT')}</h2>
         </div>
 
@@ -544,107 +544,6 @@ function newEventModalHtml() {
   const today = new Date().toISOString().slice(0, 10)
 
   return `
-    <style>
-      .new-event-modal-backdrop {
-        position: fixed;
-        inset: 0;
-        z-index: 1000;
-        display: grid;
-        place-items: center;
-        padding: 24px;
-        background: rgba(0, 0, 0, 0.72);
-      }
-
-      .new-event-modal {
-        width: min(560px, 100%);
-        max-height: calc(100vh - 48px);
-        overflow: auto;
-        border: 1px solid rgba(255, 255, 255, 0.14);
-        border-radius: 20px;
-        background: #080d17;
-        color: #ffffff;
-      }
-
-      .new-event-modal__head,
-      .new-event-modal__actions {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 16px;
-        padding: 20px 22px;
-      }
-
-      .new-event-modal__head {
-        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-      }
-
-      .new-event-modal__head h2 {
-        margin: 0;
-      }
-
-      .new-event-modal__close {
-        border: 0;
-        background: transparent;
-        color: inherit;
-        cursor: pointer;
-      }
-
-      .new-event-form {
-        display: grid;
-        gap: 16px;
-        padding: 22px;
-      }
-
-      .new-event-form label {
-        display: grid;
-        gap: 8px;
-        font-weight: 600;
-      }
-
-      .new-event-form input {
-        width: 100%;
-        box-sizing: border-box;
-        border: 1px solid rgba(255, 255, 255, 0.16);
-        border-radius: 12px;
-        padding: 12px 14px;
-        background: #111827;
-        color: #ffffff;
-        font: inherit;
-      }
-
-      .new-event-form__row {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 14px;
-      }
-
-      .new-event-modal__actions {
-        justify-content: flex-end;
-        padding: 0;
-      }
-
-      .new-event-modal__secondary {
-        border: 1px solid rgba(255, 255, 255, 0.18);
-        border-radius: 12px;
-        padding: 11px 16px;
-        background: transparent;
-        color: inherit;
-        cursor: pointer;
-      }
-
-      .new-event-form__message {
-        min-height: 20px;
-        margin: 0;
-        color: #ffb4b4;
-      }
-
-      @media (max-width: 560px) {
-        .new-event-form__row {
-          grid-template-columns: 1fr;
-        }
-      }
-    </style>
-
     <div class="new-event-modal-backdrop" data-close-new-event>
       <section
         class="new-event-modal"
@@ -655,7 +554,7 @@ function newEventModalHtml() {
         <div class="new-event-modal__head">
           <div>
             <span>CALENDARIO</span>
-            <h2 id="newEventTitle">Nuovo allenamento</h2>
+            <h2 id="newEventTitle">Nuovo evento</h2>
           </div>
 
           <button
@@ -669,6 +568,16 @@ function newEventModalHtml() {
         </div>
 
         <form id="newEventForm" class="new-event-form">
+          <label>
+            Tipo evento
+            <select name="eventType" required>
+              <option value="training">Allenamento</option>
+              <option value="match">Partita</option>
+              <option value="meeting">Riunione</option>
+              <option value="rest">Riposo</option>
+            </select>
+          </label>
+
           <div class="new-event-form__row">
             <label>
               Data
@@ -682,12 +591,11 @@ function newEventModalHtml() {
           </div>
 
           <label>
-            Campo
+            Luogo
             <input
               name="location"
               type="text"
               placeholder="Es. Mezzolara"
-              required
             >
           </label>
 
@@ -697,8 +605,10 @@ function newEventModalHtml() {
               name="trainingSheet"
               type="file"
               accept="image/png,image/jpeg,application/pdf"
-              required
             >
+            <small>
+              Facoltativa. Puoi allegarla subito oppure aggiungerla in seguito.
+            </small>
           </label>
 
           <p
@@ -721,7 +631,7 @@ function newEventModalHtml() {
               class="primary-action"
               type="submit"
             >
-              Salva allenamento
+              Salva evento
             </button>
           </div>
         </form>
@@ -935,6 +845,7 @@ export async function attachAppEvents() {
     }
 
     modalRoot.innerHTML = ''
+    document.body.classList.remove('new-event-modal-open')
   }
 
   function openNewEventModal() {
@@ -943,6 +854,7 @@ export async function attachAppEvents() {
     }
 
     modalRoot.innerHTML = newEventModalHtml()
+    document.body.classList.add('new-event-modal-open')
 
     const backdrop = modalRoot.querySelector(
       '.new-event-modal-backdrop',
@@ -972,6 +884,9 @@ export async function attachAppEvents() {
       event.preventDefault()
 
       const formData = new FormData(form)
+      const eventType = String(
+        formData.get('eventType') ?? 'training',
+      )
       const date = formData.get('date')
       const time = formData.get('time')
       const location = String(
@@ -979,15 +894,8 @@ export async function attachAppEvents() {
       ).trim()
       const file = formData.get('trainingSheet')
 
-      if (
-        !date ||
-        !time ||
-        !location ||
-        !(file instanceof File) ||
-        file.size === 0
-      ) {
-        message.textContent =
-          'Compila tutti i campi e seleziona la Training Sheet.'
+      if (!date || !time) {
+        message.textContent = 'Inserisci data e ora.'
         return
       }
 
@@ -995,28 +903,39 @@ export async function attachAppEvents() {
       saveButton.textContent = 'Salvataggio...'
       message.textContent = ''
 
-      const safeName = file.name
-        .normalize('NFD')
-        .replace(/[\\u0300-\\u036f]/g, '')
-        .replace(/[^a-zA-Z0-9._-]/g, '-')
+      const eventTitles = {
+        training: 'Allenamento',
+        match: 'Partita',
+        meeting: 'Riunione',
+        rest: 'Riposo',
+      }
 
-      const filePath =
-        `${date}/${crypto.randomUUID()}-${safeName}`
+      let filePath = null
 
-      const { error: uploadError } =
-        await supabase.storage
-          .from('training-sheets')
-          .upload(filePath, file, {
-            cacheControl: '3600',
-            upsert: false,
-          })
+      if (file instanceof File && file.size > 0) {
+        const safeName = file.name
+          .normalize('NFD')
+          .replace(/[\\u0300-\\u036f]/g, '')
+          .replace(/[^a-zA-Z0-9._-]/g, '-')
 
-      if (uploadError) {
-        message.textContent =
-          `Errore caricamento: ${uploadError.message}`
-        saveButton.disabled = false
-        saveButton.textContent = 'Salva allenamento'
-        return
+        filePath =
+          `${date}/${crypto.randomUUID()}-${safeName}`
+
+        const { error: uploadError } =
+          await supabase.storage
+            .from('training-sheets')
+            .upload(filePath, file, {
+              cacheControl: '3600',
+              upsert: false,
+            })
+
+        if (uploadError) {
+          message.textContent =
+            `Errore caricamento: ${uploadError.message}`
+          saveButton.disabled = false
+          saveButton.textContent = 'Salva evento'
+          return
+        }
       }
 
       const startAt = new Date(
@@ -1026,22 +945,24 @@ export async function attachAppEvents() {
       const { error: insertError } = await supabase
         .from('events')
         .insert({
-          title: 'Allenamento',
-          event_type: 'training',
+          title: eventTitles[eventType] ?? 'Evento',
+          event_type: eventType,
           start_at: startAt,
-          location,
+          location: location || null,
           training_sheet_path: filePath,
         })
 
       if (insertError) {
-        await supabase.storage
-          .from('training-sheets')
-          .remove([filePath])
+        if (filePath) {
+          await supabase.storage
+            .from('training-sheets')
+            .remove([filePath])
+        }
 
         message.textContent =
           `Errore salvataggio: ${insertError.message}`
         saveButton.disabled = false
-        saveButton.textContent = 'Salva allenamento'
+        saveButton.textContent = 'Salva evento'
         return
       }
 
