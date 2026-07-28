@@ -2128,3 +2128,76 @@ html {
 .drawer-sheet-link > span:last-child {
   grid-column: 2;
 }
+
+/* V5.3 - MATCH DAY */
+[data-md-field][hidden] {
+  display: none !important;
+}
+
+.event-md-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  color: #eef8ff;
+  font-size: 0.84rem;
+}
+
+.event-md-line span {
+  display: inline-grid;
+  min-width: 38px;
+  height: 25px;
+  place-items: center;
+  padding: 0 8px;
+  border: 1px solid rgba(47, 195, 245, 0.3);
+  border-radius: 7px;
+  color: var(--cyan);
+  background: rgba(47, 195, 245, 0.08);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.training-summary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.sidebar-nav {
+  margin-bottom: 14px;
+}
+
+.training-sheet-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.training-sheet-meta div {
+  padding: 10px;
+  border: 1px solid var(--soft);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.training-sheet-meta span,
+.training-sheet-meta strong {
+  display: block;
+}
+
+.training-sheet-meta span {
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.training-sheet-meta strong {
+  font-size: 0.78rem;
+}
+
+@media (max-width: 520px) {
+  .training-sheet-meta {
+    grid-template-columns: 1fr;
+  }
+}

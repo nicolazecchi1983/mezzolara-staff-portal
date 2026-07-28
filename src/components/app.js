@@ -72,8 +72,7 @@ async function loadCalendarEvents() {
         place: event.location || '',
         type: event.event_type || 'training',
         startAt: event.start_at,
-        intensity: event.intensity ?? null,
-        volume: event.volume ?? null,
+        matchDay: event.match_day ?? null,
         trainingSheetPath,
         trainingSheetUrl,
       }
@@ -263,7 +262,7 @@ function dashboardView() {
 
                         <div>
                           <strong>${item.title}</strong>
-                          <span>${item.place || 'Luogo non indicato'}</span>
+                          <span>${item.place || 'Luogo non indicato'}${item.type === 'training' && item.matchDay ? ` · ${item.matchDay}` : ''}</span>
                         </div>
                       </div>
                     `,
@@ -297,13 +296,8 @@ function dashboardView() {
             </div>
 
             <div>
-              <span>Intensità</span>
-              <strong>${nextTraining?.intensity ? `${nextTraining.intensity}/5` : '—'}</strong>
-            </div>
-
-            <div>
-              <span>Volume</span>
-              <strong>${nextTraining?.volume ? `${nextTraining.volume}/5` : '—'}</strong>
+              <span>MD</span>
+              <strong>${nextTraining?.matchDay || 'Nessuno'}</strong>
             </div>
           </div>
 
@@ -395,7 +389,7 @@ function calendarCells() {
                     </strong>
 
                     <span>
-                      ${event.time}${eventPlaceLabel(event)}
+                      ${event.time}${eventPlaceLabel(event)}${event.type === 'training' && event.matchDay ? ` · ${event.matchDay}` : ''}
                     </span>
                   </button>
                 `,
@@ -691,12 +685,22 @@ function drawerHtml(event) {
           ${icon('location')}
           ${event.place || 'Luogo non indicato'}
         </strong>
+
+        ${isTrainingEventType(event.type)
+          ? `<strong class="event-md-line"><span>MD</span>${event.matchDay || 'Nessuno'}</strong>`
+          : ''}
       </div>
 
       ${isTrainingEventType(event.type)
         ? `
             <div class="drawer-section">
               <label>Training Sheet</label>
+
+              <div class="training-sheet-meta">
+                <div><span>Data</span><strong>${eventDate.toLocaleDateString('it-IT')}</strong></div>
+                <div><span>Ora</span><strong>${event.time}</strong></div>
+                <div><span>MD</span><strong>${event.matchDay || 'Nessuno'}</strong></div>
+              </div>
 
               <div class="training-sheet-preview-wrap">
                 ${trainingSheetPreviewHtml(event)}
@@ -744,7 +748,7 @@ function drawerHtml(event) {
 }
 
 function newEventModalHtml() {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = formatDateInputValue(new Date())
 
   return `
     <div class="new-event-modal-backdrop" data-close-new-event>
@@ -798,6 +802,20 @@ function newEventModalHtml() {
             <select name="location" required>
               <option value="Mezzolara">Mezzolara</option>
               <option value="Budrio">Budrio</option>
+            </select>
+          </label>
+
+          <label data-md-field>
+            MD
+            <select name="matchDay">
+              <option value="">Nessuno</option>
+              <option value="MD">MD</option>
+              <option value="MD-1">MD-1</option>
+              <option value="MD-2">MD-2</option>
+              <option value="MD-3">MD-3</option>
+              <option value="MD+1">MD+1</option>
+              <option value="MD+2">MD+2</option>
+              <option value="MD+3">MD+3</option>
             </select>
           </label>
 
@@ -919,6 +937,20 @@ function editEventModalHtml(event) {
             </select>
           </label>
 
+          <label data-md-field ${isTrainingEventType(event.type) ? '' : 'hidden'}>
+            MD
+            <select name="matchDay">
+              <option value="" ${!event.matchDay ? 'selected' : ''}>Nessuno</option>
+              <option value="MD" ${event.matchDay === 'MD' ? 'selected' : ''}>MD</option>
+              <option value="MD-1" ${event.matchDay === 'MD-1' ? 'selected' : ''}>MD-1</option>
+              <option value="MD-2" ${event.matchDay === 'MD-2' ? 'selected' : ''}>MD-2</option>
+              <option value="MD-3" ${event.matchDay === 'MD-3' ? 'selected' : ''}>MD-3</option>
+              <option value="MD+1" ${event.matchDay === 'MD+1' ? 'selected' : ''}>MD+1</option>
+              <option value="MD+2" ${event.matchDay === 'MD+2' ? 'selected' : ''}>MD+2</option>
+              <option value="MD+3" ${event.matchDay === 'MD+3' ? 'selected' : ''}>MD+3</option>
+            </select>
+          </label>
+
           <label
             data-training-sheet-field
             ${isTrainingEventType(event.type) ? '' : 'hidden'}
@@ -1023,22 +1055,10 @@ function profileMenuHtml(userInitial, userEmail) {
           <span>Profilo</span>
         </button>
 
-        <button
-          class="profile-dropdown-item"
-          type="button"
-          data-profile-action="settings"
-          role="menuitem"
-        >
-          <span class="profile-dropdown-icon">
-            ${icon('settings')}
-          </span>
-
-          <span>Impostazioni</span>
-        </button>
-
         <div class="profile-dropdown-separator"></div>
 
         <button
+          id="logoutButton"
           class="profile-dropdown-item profile-dropdown-item--logout"
           type="button"
           data-profile-action="logout"
@@ -1078,14 +1098,6 @@ export function renderApp(user) {
           ${menuHtml()}
         </nav>
 
-        <button
-          id="logoutButton"
-          class="logout-button"
-          type="button"
-        >
-          ${icon('logout')}
-          <span>Esci</span>
-        </button>
       </aside>
 
       <div class="workspace">
@@ -1187,20 +1199,39 @@ export async function attachAppEvents(user) {
     const typeSelect = form?.querySelector('[name="eventType"]')
     const trainingSheetField = form?.querySelector('[data-training-sheet-field]')
     const trainingSheetInput = form?.querySelector('[name="trainingSheet"]')
+    const mdField = form?.querySelector('[data-md-field]')
+    const mdSelect = form?.querySelector('[name="matchDay"]')
 
     if (!typeSelect || !trainingSheetField) return
 
     const refresh = () => {
       const showTrainingSheet = isTrainingEventType(typeSelect.value)
       trainingSheetField.hidden = !showTrainingSheet
+      if (mdField) mdField.hidden = !showTrainingSheet
 
       if (!showTrainingSheet && trainingSheetInput) {
         trainingSheetInput.value = ''
+      }
+
+      if (!showTrainingSheet && mdSelect) {
+        mdSelect.value = ''
       }
     }
 
     typeSelect.addEventListener('change', refresh)
     refresh()
+  }
+
+  function enableDateTimePickers(form) {
+    form?.querySelectorAll('input[type="date"], input[type="time"]').forEach((input) => {
+      input.readOnly = false
+      input.disabled = false
+      input.addEventListener('click', () => {
+        if (typeof input.showPicker === 'function') {
+          try { input.showPicker() } catch (_) {}
+        }
+      })
+    })
   }
 
   function openNewEventModal() {
@@ -1222,6 +1253,7 @@ export async function attachAppEvents(user) {
     )
 
     bindEventTypeFields(form)
+    enableDateTimePickers(form)
 
     modalRoot
       .querySelectorAll('[data-close-new-event]')
@@ -1251,6 +1283,9 @@ export async function attachAppEvents(user) {
         formData.get('location') ?? '',
       ).trim()
       const file = formData.get('trainingSheet')
+      const matchDay = isTrainingEventType(eventType)
+        ? String(formData.get('matchDay') ?? '').trim() || null
+        : null
 
       if (!date || !time) {
         message.textContent = 'Inserisci data e ora.'
@@ -1311,6 +1346,7 @@ export async function attachAppEvents(user) {
           event_type: eventType,
           start_at: startAt,
           location: location || null,
+          match_day: matchDay,
           training_sheet_path: filePath,
         })
 
@@ -1387,6 +1423,7 @@ export async function attachAppEvents(user) {
     )
 
     bindEventTypeFields(form)
+    enableDateTimePickers(form)
 
     modalRoot
       .querySelectorAll('[data-close-new-event]')
@@ -1416,6 +1453,9 @@ export async function attachAppEvents(user) {
         formData.get('location') ?? '',
       ).trim()
       const file = formData.get('trainingSheet')
+      const matchDay = isTrainingEventType(eventType)
+        ? String(formData.get('matchDay') ?? '').trim() || null
+        : null
 
       if (!date || !time) {
         message.textContent = 'Inserisci data e ora.'
@@ -1469,6 +1509,7 @@ export async function attachAppEvents(user) {
           event_type: eventType,
           start_at: startAt,
           location: location || null,
+          match_day: matchDay,
           training_sheet_path: nextFilePath,
         })
         .eq('id', currentEvent.id)
@@ -1697,16 +1738,8 @@ export async function attachAppEvents(user) {
           return
         }
 
-        if (action === 'settings') {
-          setActiveNavigation('settings')
-          setView('settings', 'Impostazioni')
-          closeProfileMenu()
-          return
-        }
-
         if (action === 'logout') {
           closeProfileMenu()
-          logoutButton?.click()
         }
       })
     })
