@@ -38,8 +38,8 @@ async function loadCalendarEvents() {
         hour: '2-digit',
         minute: '2-digit',
       }),
-      place: event.location,
-      type: event.event_type,
+      place: event.location || '',
+      type: event.event_type || 'training',
       startAt: event.start_at,
       trainingSheetPath,
       trainingSheetUrl,
@@ -182,7 +182,7 @@ function dashboardView() {
           <button
             class="wide-button"
             type="button"
-            data-open-event="26"
+            data-open-event=""
           >
             Apri allenamento
           </button>
@@ -214,6 +214,21 @@ function dashboardView() {
   `
 }
 
+function eventTypeIcon(type) {
+  const icons = {
+    training: 'calendar',
+    match: 'analysis',
+    meeting: 'methodology',
+    rest: 'close',
+  }
+
+  return icon(icons[type] ?? 'calendar')
+}
+
+function eventPlaceLabel(event) {
+  return event.place ? ` · ${event.place}` : ''
+}
+
 function calendarCells() {
   const cells = [
     ...[29, 30].map((day) => ({
@@ -239,9 +254,9 @@ function calendarCells() {
 
   return cells
     .map(({ day, muted }) => {
-      const event = muted
-        ? null
-        : calendarEvents.find((item) => item.day === day)
+      const events = muted
+        ? []
+        : calendarEvents.filter((item) => item.day === day)
 
       return `
         <div class="calendar-cell ${muted ? 'is-muted' : ''}">
@@ -253,26 +268,30 @@ function calendarCells() {
             ${day}
           </span>
 
-          ${
-            event
-              ? `
-                <button
-                  class="calendar-event calendar-event--${event.type}"
-                  data-open-event="${day}"
-                  type="button"
-                >
-                  <strong>
-                    <i></i>
-                    ${event.title}
-                  </strong>
+          <div class="calendar-cell-events">
+            ${events
+              .map(
+                (event) => `
+                  <button
+                    class="calendar-event calendar-event--${event.type}"
+                    data-open-event="${event.id}"
+                    type="button"
+                  >
+                    <strong>
+                      <span class="calendar-event__icon">
+                        ${eventTypeIcon(event.type)}
+                      </span>
+                      ${event.title}
+                    </strong>
 
-                  <span>
-                    ${event.time} · ${event.place}
-                  </span>
-                </button>
-              `
-              : ''
-          }
+                    <span>
+                      ${event.time}${eventPlaceLabel(event)}
+                    </span>
+                  </button>
+                `,
+              )
+              .join('')}
+          </div>
         </div>
       `
     })
@@ -496,6 +515,34 @@ function profileView() {
   `
 }
 
+function trainingSheetPreviewHtml(event) {
+  if (!event.trainingSheetUrl) {
+    return '<small>Nessuna Training Sheet collegata.</small>'
+  }
+
+  const lowerPath = String(
+    event.trainingSheetPath ?? '',
+  ).toLowerCase()
+
+  if (lowerPath.endsWith('.pdf')) {
+    return `
+      <iframe
+        class="training-sheet-preview training-sheet-preview--pdf"
+        src="${event.trainingSheetUrl}"
+        title="Anteprima Training Sheet"
+      ></iframe>
+    `
+  }
+
+  return `
+    <img
+      class="training-sheet-preview"
+      src="${event.trainingSheetUrl}"
+      alt="Anteprima Training Sheet"
+    >
+  `
+}
+
 function drawerHtml(event) {
   return `
     <div class="drawer-backdrop" data-close-drawer></div>
@@ -515,17 +562,21 @@ function drawerHtml(event) {
       <div class="drawer-section">
         <label>Orario</label>
         <strong>${event.time}</strong>
-        <small>${event.place || 'Campo non indicato'}</small>
+        <small>${event.place || 'Luogo non indicato'}</small>
       </div>
 
       <div class="drawer-section">
         <label>Training Sheet</label>
 
+        <div class="training-sheet-preview-wrap">
+          ${trainingSheetPreviewHtml(event)}
+        </div>
+
         ${
           event.trainingSheetUrl
             ? `
               <a
-                class="wide-button"
+                class="wide-button drawer-sheet-link"
                 href="${event.trainingSheetUrl}"
                 target="_blank"
                 rel="noopener noreferrer"
@@ -533,8 +584,25 @@ function drawerHtml(event) {
                 Apri Training Sheet
               </a>
             `
-            : '<small>Nessuna Training Sheet collegata.</small>'
+            : ''
         }
+      </div>
+
+      <div class="drawer-actions">
+        <button
+          type="button"
+          data-edit-event="${event.id}"
+        >
+          Modifica evento
+        </button>
+
+        <button
+          class="drawer-delete-button"
+          type="button"
+          data-delete-event="${event.id}"
+        >
+          Elimina evento
+        </button>
       </div>
     </aside>
   `
@@ -632,6 +700,122 @@ function newEventModalHtml() {
               type="submit"
             >
               Salva evento
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  `
+}
+
+function editEventModalHtml(event) {
+  const localDate = new Date(event.startAt)
+  const date = localDate.toISOString().slice(0, 10)
+  const time = localDate.toLocaleTimeString('it-IT', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+
+  return `
+    <div class="new-event-modal-backdrop" data-close-new-event>
+      <section
+        class="new-event-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="editEventTitle"
+      >
+        <div class="new-event-modal__head">
+          <div>
+            <span>CALENDARIO</span>
+            <h2 id="editEventTitle">Modifica evento</h2>
+          </div>
+
+          <button
+            class="new-event-modal__close"
+            type="button"
+            data-close-new-event
+            aria-label="Chiudi"
+          >
+            ${icon('close')}
+          </button>
+        </div>
+
+        <form id="editEventForm" class="new-event-form">
+          <input name="eventId" type="hidden" value="${event.id}">
+
+          <label>
+            Tipo evento
+            <select name="eventType" required>
+              <option value="training" ${event.type === 'training' ? 'selected' : ''}>
+                Allenamento
+              </option>
+              <option value="match" ${event.type === 'match' ? 'selected' : ''}>
+                Partita
+              </option>
+              <option value="meeting" ${event.type === 'meeting' ? 'selected' : ''}>
+                Riunione
+              </option>
+              <option value="rest" ${event.type === 'rest' ? 'selected' : ''}>
+                Riposo
+              </option>
+            </select>
+          </label>
+
+          <div class="new-event-form__row">
+            <label>
+              Data
+              <input name="date" type="date" value="${date}" required>
+            </label>
+
+            <label>
+              Ora
+              <input name="time" type="time" value="${time}" required>
+            </label>
+          </div>
+
+          <label>
+            Luogo
+            <input
+              name="location"
+              type="text"
+              value="${event.place || ''}"
+              placeholder="Es. Mezzolara"
+            >
+          </label>
+
+          <label>
+            Sostituisci Training Sheet
+            <input
+              name="trainingSheet"
+              type="file"
+              accept="image/png,image/jpeg,application/pdf"
+            >
+            <small>
+              Lascia vuoto per mantenere il file attuale.
+            </small>
+          </label>
+
+          <p
+            id="newEventMessage"
+            class="new-event-form__message"
+            aria-live="polite"
+          ></p>
+
+          <div class="new-event-modal__actions">
+            <button
+              class="new-event-modal__secondary"
+              type="button"
+              data-close-new-event
+            >
+              Annulla
+            </button>
+
+            <button
+              id="saveNewEventButton"
+              class="primary-action"
+              type="submit"
+            >
+              Salva modifiche
             </button>
           </div>
         </form>
@@ -973,9 +1157,213 @@ export async function attachAppEvents() {
     })
   }
 
-  function openDrawer(day) {
+  async function uploadTrainingSheet(file, date) {
+    if (!(file instanceof File) || file.size === 0) {
+      return {
+        filePath: null,
+        error: null,
+      }
+    }
+
+    const safeName = file.name
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9._-]/g, '-')
+
+    const filePath =
+      `${date}/${crypto.randomUUID()}-${safeName}`
+
+    const { error } = await supabase.storage
+      .from('training-sheets')
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: false,
+      })
+
+    return {
+      filePath,
+      error,
+    }
+  }
+
+  function openEditEventModal(eventId) {
+    const currentEvent = calendarEvents.find(
+      (item) => String(item.id) === String(eventId),
+    )
+
+    if (!currentEvent || !modalRoot) {
+      return
+    }
+
+    modalRoot.innerHTML = editEventModalHtml(currentEvent)
+    document.body.classList.add('new-event-modal-open')
+
+    const backdrop = modalRoot.querySelector(
+      '.new-event-modal-backdrop',
+    )
+    const form = modalRoot.querySelector('#editEventForm')
+    const message = modalRoot.querySelector('#newEventMessage')
+    const saveButton = modalRoot.querySelector(
+      '#saveNewEventButton',
+    )
+
+    modalRoot
+      .querySelectorAll('[data-close-new-event]')
+      .forEach((element) => {
+        element.addEventListener('click', (clickEvent) => {
+          if (
+            element === backdrop &&
+            clickEvent.target !== backdrop
+          ) {
+            return
+          }
+
+          closeNewEventModal()
+        })
+      })
+
+    form?.addEventListener('submit', async (submitEvent) => {
+      submitEvent.preventDefault()
+
+      const formData = new FormData(form)
+      const eventType = String(
+        formData.get('eventType') ?? 'training',
+      )
+      const date = formData.get('date')
+      const time = formData.get('time')
+      const location = String(
+        formData.get('location') ?? '',
+      ).trim()
+      const file = formData.get('trainingSheet')
+
+      if (!date || !time) {
+        message.textContent = 'Inserisci data e ora.'
+        return
+      }
+
+      saveButton.disabled = true
+      saveButton.textContent = 'Salvataggio...'
+      message.textContent = ''
+
+      const eventTitles = {
+        training: 'Allenamento',
+        match: 'Partita',
+        meeting: 'Riunione',
+        rest: 'Riposo',
+      }
+
+      let nextFilePath = currentEvent.trainingSheetPath
+
+      if (file instanceof File && file.size > 0) {
+        const uploadResult = await uploadTrainingSheet(
+          file,
+          String(date),
+        )
+
+        if (uploadResult.error) {
+          message.textContent =
+            `Errore caricamento: ${uploadResult.error.message}`
+          saveButton.disabled = false
+          saveButton.textContent = 'Salva modifiche'
+          return
+        }
+
+        nextFilePath = uploadResult.filePath
+      }
+
+      const startAt = new Date(
+        `${date}T${time}:00`,
+      ).toISOString()
+
+      const { error: updateError } = await supabase
+        .from('events')
+        .update({
+          title: eventTitles[eventType] ?? 'Evento',
+          event_type: eventType,
+          start_at: startAt,
+          location: location || null,
+          training_sheet_path: nextFilePath,
+        })
+        .eq('id', currentEvent.id)
+
+      if (updateError) {
+        if (
+          nextFilePath &&
+          nextFilePath !== currentEvent.trainingSheetPath
+        ) {
+          await supabase.storage
+            .from('training-sheets')
+            .remove([nextFilePath])
+        }
+
+        message.textContent =
+          `Errore modifica: ${updateError.message}`
+        saveButton.disabled = false
+        saveButton.textContent = 'Salva modifiche'
+        return
+      }
+
+      if (
+        nextFilePath &&
+        currentEvent.trainingSheetPath &&
+        nextFilePath !== currentEvent.trainingSheetPath
+      ) {
+        await supabase.storage
+          .from('training-sheets')
+          .remove([currentEvent.trainingSheetPath])
+      }
+
+      closeNewEventModal()
+      await loadCalendarEvents()
+      root.innerHTML = calendarView()
+      bindDynamic()
+    })
+  }
+
+  async function deleteEvent(eventId) {
+    const currentEvent = calendarEvents.find(
+      (item) => String(item.id) === String(eventId),
+    )
+
+    if (!currentEvent) {
+      return
+    }
+
+    const confirmed = window.confirm(
+      `Eliminare "${currentEvent.title}" del ${new Date(
+        currentEvent.startAt,
+      ).toLocaleDateString('it-IT')}?`,
+    )
+
+    if (!confirmed) {
+      return
+    }
+
+    const { error: deleteError } = await supabase
+      .from('events')
+      .delete()
+      .eq('id', currentEvent.id)
+
+    if (deleteError) {
+      alert(`Errore eliminazione: ${deleteError.message}`)
+      return
+    }
+
+    if (currentEvent.trainingSheetPath) {
+      await supabase.storage
+        .from('training-sheets')
+        .remove([currentEvent.trainingSheetPath])
+    }
+
+    closeDrawer()
+    await loadCalendarEvents()
+    root.innerHTML = calendarView()
+    bindDynamic()
+  }
+
+  function openDrawer(eventId) {
     const event = calendarEvents.find(
-      (item) => item.day === Number(day),
+      (item) => String(item.id) === String(eventId),
     )
 
     if (!event) {
@@ -990,6 +1378,19 @@ export async function attachAppEvents() {
       .querySelectorAll('[data-close-drawer]')
       .forEach((element) => {
         element.addEventListener('click', closeDrawer)
+      })
+
+    drawerRoot
+      .querySelector('[data-edit-event]')
+      ?.addEventListener('click', () => {
+        closeDrawer()
+        openEditEventModal(event.id)
+      })
+
+    drawerRoot
+      .querySelector('[data-delete-event]')
+      ?.addEventListener('click', async () => {
+        await deleteEvent(event.id)
       })
   }
 
