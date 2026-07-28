@@ -22,25 +22,29 @@ async function loadCalendarEvents() {
     return
   }
 
-  if (error) {
-  alert(`Errore Supabase: ${error.message}`)
-  return
-}
+  calendarEvents = data.map((event) => {
+    const trainingSheetPath = event.training_sheet_path ?? null
+    const trainingSheetUrl = trainingSheetPath
+      ? supabase.storage
+          .from('training-sheets')
+          .getPublicUrl(trainingSheetPath).data.publicUrl
+      : null
 
-  calendarEvents = data.map(event => ({
-    day: new Date(event.start_at).getDate(),
-    title: event.title,
-    time: new Date(event.start_at).toLocaleTimeString('it-IT', {
-      hour: '2-digit',
-      minute: '2-digit',
-    }),
-    place: event.location,
-    type: event.event_type,
-    intensity: event.intensity,
-    volume: event.volume,
-    present: '-',
-    sheet: '-',
-  }))
+    return {
+      id: event.id,
+      day: new Date(event.start_at).getDate(),
+      title: event.title,
+      time: new Date(event.start_at).toLocaleTimeString('it-IT', {
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      place: event.location,
+      type: event.event_type,
+      startAt: event.start_at,
+      trainingSheetPath,
+      trainingSheetUrl,
+    }
+  })
 }
 
 const menu = [
@@ -289,7 +293,7 @@ function calendarView() {
           </p>
         </div>
 
-        <button class="primary-action" type="button">
+        <button class="primary-action" type="button" data-new-event>
           ${icon('plus')}
           Nuovo evento
         </button>
@@ -494,23 +498,16 @@ function profileView() {
 
 function drawerHtml(event) {
   return `
-    <div
-      class="drawer-backdrop"
-      data-close-drawer
-    ></div>
+    <div class="drawer-backdrop" data-close-drawer></div>
 
     <aside class="event-drawer">
       <div class="drawer-head">
         <div>
           <span>ALLENAMENTO</span>
-          <h2>26 Luglio 2026</h2>
+          <h2>${new Date(event.startAt).toLocaleDateString('it-IT')}</h2>
         </div>
 
-        <button
-          type="button"
-          data-close-drawer
-          aria-label="Chiudi"
-        >
+        <button type="button" data-close-drawer aria-label="Chiudi">
           ${icon('close')}
         </button>
       </div>
@@ -518,49 +515,218 @@ function drawerHtml(event) {
       <div class="drawer-section">
         <label>Orario</label>
         <strong>${event.time}</strong>
-        <small>${event.place}</small>
-      </div>
-
-      <div class="drawer-grid">
-        <div>
-          <span>Presenti</span>
-          <strong>${event.present}</strong>
-        </div>
-
-        <div>
-          <span>Training Sheet</span>
-          <strong>${event.sheet}</strong>
-        </div>
-
-        <div>
-          <span>Intensità</span>
-          <strong>${event.intensity}/5</strong>
-        </div>
-
-        <div>
-          <span>Volume</span>
-          <strong>${event.volume}/5</strong>
-        </div>
+        <small>${event.place || 'Campo non indicato'}</small>
       </div>
 
       <div class="drawer-section">
-        <label>Note</label>
+        <label>Training Sheet</label>
 
-        <textarea
-          placeholder="Aggiungi note per lo staff..."
-        ></textarea>
-      </div>
-
-      <div class="drawer-actions">
-        <button type="button">
-          Carica PNG
-        </button>
-
-        <button class="primary-action" type="button">
-          Salva modifiche
-        </button>
+        ${
+          event.trainingSheetUrl
+            ? `
+              <a
+                class="wide-button"
+                href="${event.trainingSheetUrl}"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Apri Training Sheet
+              </a>
+            `
+            : '<small>Nessuna Training Sheet collegata.</small>'
+        }
       </div>
     </aside>
+  `
+}
+
+function newEventModalHtml() {
+  const today = new Date().toISOString().slice(0, 10)
+
+  return `
+    <style>
+      .new-event-modal-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 1000;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background: rgba(0, 0, 0, 0.72);
+      }
+
+      .new-event-modal {
+        width: min(560px, 100%);
+        max-height: calc(100vh - 48px);
+        overflow: auto;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 20px;
+        background: #080d17;
+        color: #ffffff;
+      }
+
+      .new-event-modal__head,
+      .new-event-modal__actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 20px 22px;
+      }
+
+      .new-event-modal__head {
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      }
+
+      .new-event-modal__head h2 {
+        margin: 0;
+      }
+
+      .new-event-modal__close {
+        border: 0;
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+      }
+
+      .new-event-form {
+        display: grid;
+        gap: 16px;
+        padding: 22px;
+      }
+
+      .new-event-form label {
+        display: grid;
+        gap: 8px;
+        font-weight: 600;
+      }
+
+      .new-event-form input {
+        width: 100%;
+        box-sizing: border-box;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 12px;
+        padding: 12px 14px;
+        background: #111827;
+        color: #ffffff;
+        font: inherit;
+      }
+
+      .new-event-form__row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+      }
+
+      .new-event-modal__actions {
+        justify-content: flex-end;
+        padding: 0;
+      }
+
+      .new-event-modal__secondary {
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 12px;
+        padding: 11px 16px;
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+      }
+
+      .new-event-form__message {
+        min-height: 20px;
+        margin: 0;
+        color: #ffb4b4;
+      }
+
+      @media (max-width: 560px) {
+        .new-event-form__row {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+
+    <div class="new-event-modal-backdrop" data-close-new-event>
+      <section
+        class="new-event-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="newEventTitle"
+      >
+        <div class="new-event-modal__head">
+          <div>
+            <span>CALENDARIO</span>
+            <h2 id="newEventTitle">Nuovo allenamento</h2>
+          </div>
+
+          <button
+            class="new-event-modal__close"
+            type="button"
+            data-close-new-event
+            aria-label="Chiudi"
+          >
+            ${icon('close')}
+          </button>
+        </div>
+
+        <form id="newEventForm" class="new-event-form">
+          <div class="new-event-form__row">
+            <label>
+              Data
+              <input name="date" type="date" value="${today}" required>
+            </label>
+
+            <label>
+              Ora
+              <input name="time" type="time" value="17:30" required>
+            </label>
+          </div>
+
+          <label>
+            Campo
+            <input
+              name="location"
+              type="text"
+              placeholder="Es. Mezzolara"
+              required
+            >
+          </label>
+
+          <label>
+            Training Sheet
+            <input
+              name="trainingSheet"
+              type="file"
+              accept="image/png,image/jpeg,application/pdf"
+              required
+            >
+          </label>
+
+          <p
+            id="newEventMessage"
+            class="new-event-form__message"
+            aria-live="polite"
+          ></p>
+
+          <div class="new-event-modal__actions">
+            <button
+              class="new-event-modal__secondary"
+              type="button"
+              data-close-new-event
+            >
+              Annulla
+            </button>
+
+            <button
+              id="saveNewEventButton"
+              class="primary-action"
+              type="submit"
+            >
+              Salva allenamento
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
   `
 }
 
@@ -711,6 +877,7 @@ export function renderApp(user) {
       </div>
 
       <div id="drawerRoot"></div>
+      <div id="modalRoot"></div>
     </div>
   `
 }
@@ -720,6 +887,7 @@ export async function attachAppEvents() {
   
   const root = document.querySelector('#viewRoot')
   const drawerRoot = document.querySelector('#drawerRoot')
+  const modalRoot = document.querySelector('#modalRoot')
 
   const logoutButton =
     document.querySelector('#logoutButton')
@@ -760,6 +928,129 @@ export async function attachAppEvents() {
 
   bindDynamic()
 }
+
+  function closeNewEventModal() {
+    if (!modalRoot) {
+      return
+    }
+
+    modalRoot.innerHTML = ''
+  }
+
+  function openNewEventModal() {
+    if (!modalRoot) {
+      return
+    }
+
+    modalRoot.innerHTML = newEventModalHtml()
+
+    const backdrop = modalRoot.querySelector(
+      '.new-event-modal-backdrop',
+    )
+    const form = modalRoot.querySelector('#newEventForm')
+    const message = modalRoot.querySelector('#newEventMessage')
+    const saveButton = modalRoot.querySelector(
+      '#saveNewEventButton',
+    )
+
+    modalRoot
+      .querySelectorAll('[data-close-new-event]')
+      .forEach((element) => {
+        element.addEventListener('click', (event) => {
+          if (
+            element === backdrop &&
+            event.target !== backdrop
+          ) {
+            return
+          }
+
+          closeNewEventModal()
+        })
+      })
+
+    form?.addEventListener('submit', async (event) => {
+      event.preventDefault()
+
+      const formData = new FormData(form)
+      const date = formData.get('date')
+      const time = formData.get('time')
+      const location = String(
+        formData.get('location') ?? '',
+      ).trim()
+      const file = formData.get('trainingSheet')
+
+      if (
+        !date ||
+        !time ||
+        !location ||
+        !(file instanceof File) ||
+        file.size === 0
+      ) {
+        message.textContent =
+          'Compila tutti i campi e seleziona la Training Sheet.'
+        return
+      }
+
+      saveButton.disabled = true
+      saveButton.textContent = 'Salvataggio...'
+      message.textContent = ''
+
+      const safeName = file.name
+        .normalize('NFD')
+        .replace(/[\\u0300-\\u036f]/g, '')
+        .replace(/[^a-zA-Z0-9._-]/g, '-')
+
+      const filePath =
+        `${date}/${crypto.randomUUID()}-${safeName}`
+
+      const { error: uploadError } =
+        await supabase.storage
+          .from('training-sheets')
+          .upload(filePath, file, {
+            cacheControl: '3600',
+            upsert: false,
+          })
+
+      if (uploadError) {
+        message.textContent =
+          `Errore caricamento: ${uploadError.message}`
+        saveButton.disabled = false
+        saveButton.textContent = 'Salva allenamento'
+        return
+      }
+
+      const startAt = new Date(
+        `${date}T${time}:00`,
+      ).toISOString()
+
+      const { error: insertError } = await supabase
+        .from('events')
+        .insert({
+          title: 'Allenamento',
+          event_type: 'training',
+          start_at: startAt,
+          location,
+          training_sheet_path: filePath,
+        })
+
+      if (insertError) {
+        await supabase.storage
+          .from('training-sheets')
+          .remove([filePath])
+
+        message.textContent =
+          `Errore salvataggio: ${insertError.message}`
+        saveButton.disabled = false
+        saveButton.textContent = 'Salva allenamento'
+        return
+      }
+
+      closeNewEventModal()
+      await loadCalendarEvents()
+      root.innerHTML = calendarView()
+      bindDynamic()
+    })
+  }
 
   function openDrawer(day) {
     const event = calendarEvents.find(
@@ -846,6 +1137,15 @@ export async function attachAppEvents() {
       })
   }
 
+  document.addEventListener('click', (event) => {
+    const newEventButton = event.target.closest('[data-new-event]')
+
+    if (newEventButton) {
+      event.preventDefault()
+      openNewEventModal()
+    }
+  })
+
   document
     .querySelectorAll('.nav-item')
     .forEach((button) => {
@@ -914,6 +1214,7 @@ export async function attachAppEvents() {
     if (event.key === 'Escape') {
       closeProfileMenu()
       closeDrawer()
+      closeNewEventModal()
     }
   })
 
