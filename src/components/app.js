@@ -432,28 +432,8 @@ function calendarView() {
       </div>
 
       <section class="calendar-panel">
-        <div class="calendar-toolbar">
-          <div>
-            <button type="button">‹</button>
-            <button type="button">›</button>
-            <button type="button">Oggi</button>
-          </div>
-
+        <div class="calendar-toolbar calendar-toolbar--clean">
           <h2>Luglio 2026</h2>
-
-          <div>
-            <button class="is-active" type="button">
-              Mese
-            </button>
-
-            <button type="button">
-              Settimana
-            </button>
-
-            <button type="button">
-              Agenda
-            </button>
-          </div>
         </div>
 
         <div class="calendar-weekdays">

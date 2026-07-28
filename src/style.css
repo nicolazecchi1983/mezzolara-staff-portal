@@ -2201,3 +2201,91 @@ html {
     grid-template-columns: 1fr;
   }
 }
+
+/* V5.3.3 — Smartphone: sola visualizzazione Mese */
+@media (max-width: 760px) {
+  .calendar-panel {
+    overflow-x: hidden;
+  }
+
+  .calendar-toolbar {
+    grid-template-columns: 1fr auto;
+    gap: 10px;
+    min-width: 0;
+    padding: 8px 10px;
+  }
+
+  .calendar-toolbar > div:last-child {
+    display: none;
+  }
+
+  .calendar-toolbar h2 {
+    justify-self: end;
+    margin: 0;
+    font-size: 1rem;
+    white-space: nowrap;
+  }
+
+  .calendar-toolbar,
+  .calendar-weekdays,
+  .calendar-grid {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .calendar-toolbar button {
+    height: 32px;
+    padding: 0 10px;
+  }
+
+  .calendar-weekdays span {
+    font-size: 0.58rem;
+  }
+
+  .calendar-cell {
+    min-width: 0;
+    min-height: 76px;
+    padding: 6px 4px;
+  }
+
+  .calendar-event {
+    min-width: 0;
+    padding: 4px;
+  }
+
+  .calendar-event strong,
+  .calendar-event span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+/* V5.3.4 — Header calendario pulito */
+.calendar-toolbar--clean {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 14px 16px;
+}
+
+.calendar-toolbar--clean h2 {
+  margin: 0;
+  text-align: center;
+  font-size: 1.1rem;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .calendar-toolbar--clean {
+    display: flex;
+    justify-content: center;
+    padding: 10px 8px;
+  }
+
+  .calendar-toolbar--clean h2 {
+    justify-self: auto;
+    font-size: 1rem;
+  }
+}
