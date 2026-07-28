@@ -11,6 +11,7 @@ export function icon(name) {
     logout: '<path d="M10 17l5-5-5-5"/><path d="M15 12H3"/><path d="M14 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
     close: '<path d="m6 6 12 12M18 6 6 18"/>',
+    location: '<path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/>',
   }
   return `<svg viewBox="0 0 24 24" aria-hidden="true">${icons[name] ?? ''}</svg>`
 }

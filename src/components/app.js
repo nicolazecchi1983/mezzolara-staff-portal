@@ -124,6 +124,18 @@ function formatLongDate(date) {
   }).format(date)
 }
 
+function formatDateInputValue(dateLike) {
+  const date = new Date(dateLike)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function isTrainingEventType(type) {
+  return type === 'training'
+}
+
 function getUpcomingEvents() {
   const today = startOfToday()
   return calendarEvents.filter(
@@ -664,7 +676,8 @@ function drawerHtml(event) {
             ${eventTypeIcon(event.type)}
             ${event.title.toUpperCase()}
           </span>
-          <h2>${formattedDate} · ${event.time}</h2>
+          <h2 class="drawer-event-date">${formattedDate}</h2>
+          <time class="drawer-event-time">${event.time}</time>
         </div>
 
         <button type="button" data-close-drawer aria-label="Chiudi">
@@ -675,34 +688,36 @@ function drawerHtml(event) {
       <div class="drawer-section">
         <label>Campo</label>
         <strong class="event-location-line">
-          ${icon('calendar')}
+          ${icon('location')}
           ${event.place || 'Luogo non indicato'}
         </strong>
       </div>
 
-      <div class="drawer-section">
-        <label>Training Sheet</label>
+      ${isTrainingEventType(event.type)
+        ? `
+            <div class="drawer-section">
+              <label>Training Sheet</label>
 
-        <div class="training-sheet-preview-wrap">
-          ${trainingSheetPreviewHtml(event)}
-        </div>
+              <div class="training-sheet-preview-wrap">
+                ${trainingSheetPreviewHtml(event)}
+              </div>
 
-        ${
-          event.trainingSheetUrl
-            ? `
-              <a
-                class="wide-button drawer-sheet-link"
-                href="${event.trainingSheetUrl}"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                ${icon('sheet')}
-                Apri Training Sheet
-              </a>
-            `
-            : ''
-        }
-      </div>
+              ${event.trainingSheetUrl
+                ? `
+                    <a
+                      class="wide-button drawer-sheet-link"
+                      href="${event.trainingSheetUrl}"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <span class="drawer-sheet-link__icon">${icon('sheet')}</span>
+                      <span>Apri Training Sheet</span>
+                    </a>
+                  `
+                : ''}
+            </div>
+          `
+        : ''}
 
       ${isOwner()
         ? `
@@ -786,7 +801,7 @@ function newEventModalHtml() {
             </select>
           </label>
 
-          <label>
+          <label data-training-sheet-field>
             Training Sheet
             <input
               name="trainingSheet"
@@ -829,7 +844,7 @@ function newEventModalHtml() {
 
 function editEventModalHtml(event) {
   const localDate = new Date(event.startAt)
-  const date = localDate.toISOString().slice(0, 10)
+  const date = formatDateInputValue(localDate)
   const time = localDate.toLocaleTimeString('it-IT', {
     hour: '2-digit',
     minute: '2-digit',
@@ -904,7 +919,10 @@ function editEventModalHtml(event) {
             </select>
           </label>
 
-          <label>
+          <label
+            data-training-sheet-field
+            ${isTrainingEventType(event.type) ? '' : 'hidden'}
+          >
             Sostituisci Training Sheet
             <input
               name="trainingSheet"
@@ -1126,7 +1144,12 @@ export async function attachAppEvents(user) {
   }
 
  async function setView(key, label) {
-  if (key === 'calendar') {
+  closeDrawer()
+  closeNewEventModal()
+  document.body.classList.remove('drawer-open', 'new-event-modal-open')
+  document.body.style.removeProperty('overflow')
+
+  if (key === 'calendar' || key === 'dashboard') {
     await loadCalendarEvents()
   }
 
@@ -1143,6 +1166,12 @@ export async function attachAppEvents(user) {
     : placeholderView(label)
 
   bindDynamic()
+
+  document.documentElement.scrollTop = 0
+  document.body.scrollTop = 0
+  window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+  root.scrollTop = 0
+  root.closest('.workspace')?.scrollTo?.({ top: 0, left: 0, behavior: 'auto' })
 }
 
   function closeNewEventModal() {
@@ -1152,6 +1181,26 @@ export async function attachAppEvents(user) {
 
     modalRoot.innerHTML = ''
     document.body.classList.remove('new-event-modal-open')
+  }
+
+  function bindEventTypeFields(form) {
+    const typeSelect = form?.querySelector('[name="eventType"]')
+    const trainingSheetField = form?.querySelector('[data-training-sheet-field]')
+    const trainingSheetInput = form?.querySelector('[name="trainingSheet"]')
+
+    if (!typeSelect || !trainingSheetField) return
+
+    const refresh = () => {
+      const showTrainingSheet = isTrainingEventType(typeSelect.value)
+      trainingSheetField.hidden = !showTrainingSheet
+
+      if (!showTrainingSheet && trainingSheetInput) {
+        trainingSheetInput.value = ''
+      }
+    }
+
+    typeSelect.addEventListener('change', refresh)
+    refresh()
   }
 
   function openNewEventModal() {
@@ -1171,6 +1220,8 @@ export async function attachAppEvents(user) {
     const saveButton = modalRoot.querySelector(
       '#saveNewEventButton',
     )
+
+    bindEventTypeFields(form)
 
     modalRoot
       .querySelectorAll('[data-close-new-event]')
@@ -1219,7 +1270,11 @@ export async function attachAppEvents(user) {
 
       let filePath = null
 
-      if (file instanceof File && file.size > 0) {
+      if (
+        isTrainingEventType(eventType) &&
+        file instanceof File &&
+        file.size > 0
+      ) {
         const safeName = file.name
           .normalize('NFD')
           .replace(/[\\u0300-\\u036f]/g, '')
@@ -1331,6 +1386,8 @@ export async function attachAppEvents(user) {
       '#saveNewEventButton',
     )
 
+    bindEventTypeFields(form)
+
     modalRoot
       .querySelectorAll('[data-close-new-event]')
       .forEach((element) => {
@@ -1376,9 +1433,15 @@ export async function attachAppEvents(user) {
         rest: 'Riposo',
       }
 
-      let nextFilePath = currentEvent.trainingSheetPath
+      let nextFilePath = isTrainingEventType(eventType)
+        ? currentEvent.trainingSheetPath
+        : null
 
-      if (file instanceof File && file.size > 0) {
+      if (
+        isTrainingEventType(eventType) &&
+        file instanceof File &&
+        file.size > 0
+      ) {
         const uploadResult = await uploadTrainingSheet(
           file,
           String(date),
@@ -1428,7 +1491,6 @@ export async function attachAppEvents(user) {
       }
 
       if (
-        nextFilePath &&
         currentEvent.trainingSheetPath &&
         nextFilePath !== currentEvent.trainingSheetPath
       ) {
