@@ -8,6 +8,8 @@ import {
 
 let calendarEvents = []
 let currentUserRole = 'observer'
+let currentCalendarDate = new Date()
+currentCalendarDate.setDate(1)
 
 function isOwner() {
   return currentUserRole === 'owner'
@@ -334,77 +336,79 @@ function eventPlaceLabel(event) {
 }
 
 function calendarCells() {
-  const cells = [
-    ...[29, 30].map((day) => ({
-      day,
-      muted: true,
-    })),
+  const year = currentCalendarDate.getFullYear()
+  const month = currentCalendarDate.getMonth()
+  const firstDay = new Date(year, month, 1)
+  const lastDay = new Date(year, month + 1, 0)
+  const mondayIndex = (firstDay.getDay() + 6) % 7
+  const totalCells = Math.ceil((mondayIndex + lastDay.getDate()) / 7) * 7
+  const today = new Date()
 
-    ...Array.from(
-      {
-        length: 31,
-      },
-      (_, index) => ({
-        day: index + 1,
-        muted: false,
-      }),
-    ),
+  return Array.from({ length: totalCells }, (_, index) => {
+    const cellDate = new Date(year, month, index - mondayIndex + 1)
+    const muted = cellDate.getMonth() !== month
+    const day = cellDate.getDate()
+    const dateValue = formatDateInputValue(cellDate)
 
-    ...[1, 2].map((day) => ({
-      day,
-      muted: true,
-    })),
-  ]
-
-  return cells
-    .map(({ day, muted }) => {
-      const events = muted
-        ? []
-        : calendarEvents.filter((item) => item.day === day)
-
-      const selectedDate = `2026-07-${String(day).padStart(2, '0')}`
-
-      return `
-        <div
-          class="calendar-cell ${muted ? 'is-muted' : ''}"
-          ${!muted && isOwner() ? `data-create-event-date="${selectedDate}"` : ''}
-        >
-          <span
-            class="day-number ${
-              !muted && day === 26 ? 'is-today' : ''
-            }"
-          >
-            ${day}
-          </span>
-
-          <div class="calendar-cell-events">
-            ${events
-              .map(
-                (event) => `
-                  <button
-                    class="calendar-event calendar-event--${event.type}"
-                    data-open-event="${event.id}"
-                    type="button"
-                  >
-                    <strong>
-                      <span class="calendar-event__icon">
-                        ${eventTypeIcon(event.type)}
-                      </span>
-                      ${event.title}
-                    </strong>
-
-                    <span>
-                      ${event.time}${eventPlaceLabel(event)}${event.type === 'training' && event.matchDay ? ` · ${event.matchDay}` : ''}
-                    </span>
-                  </button>
-                `,
-              )
-              .join('')}
-          </div>
-        </div>
-      `
+    const events = calendarEvents.filter((item) => {
+      const eventDate = new Date(item.startAt)
+      return (
+        eventDate.getFullYear() === cellDate.getFullYear() &&
+        eventDate.getMonth() === cellDate.getMonth() &&
+        eventDate.getDate() === cellDate.getDate()
+      )
     })
-    .join('')
+
+    const isToday =
+      cellDate.getFullYear() === today.getFullYear() &&
+      cellDate.getMonth() === today.getMonth() &&
+      cellDate.getDate() === today.getDate()
+
+    return `
+      <div
+        class="calendar-cell ${muted ? 'is-muted' : ''}"
+        ${!muted && isOwner() ? `data-create-event-date="${dateValue}"` : ''}
+      >
+        <span class="day-number ${isToday ? 'is-today' : ''}">
+          ${day}
+        </span>
+
+        <div class="calendar-cell-events">
+          ${events
+            .map(
+              (event) => `
+                <button
+                  class="calendar-event calendar-event--${event.type}"
+                  data-open-event="${event.id}"
+                  type="button"
+                >
+                  <strong>
+                    <span class="calendar-event__icon">
+                      ${eventTypeIcon(event.type)}
+                    </span>
+                    ${event.title}
+                  </strong>
+
+                  <span>
+                    ${event.time}${eventPlaceLabel(event)}${event.type === 'training' && event.matchDay ? ` · ${event.matchDay}` : ''}
+                  </span>
+                </button>
+              `,
+            )
+            .join('')}
+        </div>
+      </div>
+    `
+  }).join('')
+}
+
+function calendarMonthTitle() {
+  const title = new Intl.DateTimeFormat('it-IT', {
+    month: 'long',
+    year: 'numeric',
+  }).format(currentCalendarDate)
+
+  return title.charAt(0).toUpperCase() + title.slice(1)
 }
 
 function calendarView() {
@@ -433,7 +437,21 @@ function calendarView() {
 
       <section class="calendar-panel">
         <div class="calendar-toolbar calendar-toolbar--clean">
-          <h2>Luglio 2026</h2>
+          <button
+            class="calendar-month-nav"
+            type="button"
+            data-calendar-prev
+            aria-label="Mese precedente"
+          >‹</button>
+
+          <h2>${calendarMonthTitle()}</h2>
+
+          <button
+            class="calendar-month-nav"
+            type="button"
+            data-calendar-next
+            aria-label="Mese successivo"
+          >›</button>
         </div>
 
         <div class="calendar-weekdays">
@@ -1690,6 +1708,27 @@ export async function attachAppEvents(user) {
           openNewEventModal(cell.dataset.createEventDate)
         })
       })
+
+
+    root.querySelector('[data-calendar-prev]')?.addEventListener('click', () => {
+      currentCalendarDate = new Date(
+        currentCalendarDate.getFullYear(),
+        currentCalendarDate.getMonth() - 1,
+        1,
+      )
+      root.innerHTML = calendarView()
+      bindDynamic()
+    })
+
+    root.querySelector('[data-calendar-next]')?.addEventListener('click', () => {
+      currentCalendarDate = new Date(
+        currentCalendarDate.getFullYear(),
+        currentCalendarDate.getMonth() + 1,
+        1,
+      )
+      root.innerHTML = calendarView()
+      bindDynamic()
+    })
   }
 
   document

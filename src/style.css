@@ -2289,3 +2289,45 @@ html {
     font-size: 1rem;
   }
 }
+
+/* V5.3.5 - cambio mese compatto */
+.calendar-toolbar--clean {
+  display: grid;
+  grid-template-columns: 36px auto 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.calendar-month-nav {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  color: var(--text);
+  background: transparent;
+  font-size: 1.8rem;
+  line-height: 1;
+}
+
+.calendar-month-nav:hover,
+.calendar-month-nav:focus-visible {
+  border-color: var(--border);
+  background: rgba(20, 141, 234, 0.1);
+}
+
+@media (max-width: 720px) {
+  .calendar-toolbar--clean {
+    grid-template-columns: 32px auto 32px;
+    gap: 6px;
+  }
+
+  .calendar-month-nav {
+    width: 32px;
+    height: 32px;
+    font-size: 1.55rem;
+  }
+}
