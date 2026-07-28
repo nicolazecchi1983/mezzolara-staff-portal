@@ -2,14 +2,37 @@ import { icon } from './icons.js'
 import { supabase } from '../supabase.js'
 
 import {
-  dashboardStats,
-  todayItems,
-  recentActivity,
   players,
   analysisItems,
 } from '../data/appData.js'
 
 let calendarEvents = []
+let currentUserRole = 'observer'
+
+function isOwner() {
+  return currentUserRole === 'owner'
+}
+
+async function loadCurrentUserRole(user) {
+  if (!user?.id) {
+    currentUserRole = 'observer'
+    return
+  }
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('id', user.id)
+    .maybeSingle()
+
+  if (error) {
+    console.error('Errore caricamento ruolo:', error.message)
+    currentUserRole = 'observer'
+    return
+  }
+
+  currentUserRole = data?.role ?? 'observer'
+}
 
 async function loadCalendarEvents() {
   const { data, error } = await supabase
@@ -22,29 +45,40 @@ async function loadCalendarEvents() {
     return
   }
 
-  calendarEvents = data.map((event) => {
-    const trainingSheetPath = event.training_sheet_path ?? null
-    const trainingSheetUrl = trainingSheetPath
-      ? supabase.storage
-          .from('training-sheets')
-          .getPublicUrl(trainingSheetPath).data.publicUrl
-      : null
+  calendarEvents = await Promise.all(
+    data.map(async (event) => {
+      const trainingSheetPath = event.training_sheet_path ?? null
+      let trainingSheetUrl = null
 
-    return {
-      id: event.id,
-      day: new Date(event.start_at).getDate(),
-      title: event.title,
-      time: new Date(event.start_at).toLocaleTimeString('it-IT', {
-        hour: '2-digit',
-        minute: '2-digit',
-      }),
-      place: event.location || '',
-      type: event.event_type || 'training',
-      startAt: event.start_at,
-      trainingSheetPath,
-      trainingSheetUrl,
-    }
-  })
+      if (trainingSheetPath) {
+        const { data: signedData, error: signedError } =
+          await supabase.storage
+            .from('training-sheets')
+            .createSignedUrl(trainingSheetPath, 3600)
+
+        if (!signedError) {
+          trainingSheetUrl = signedData.signedUrl
+        }
+      }
+
+      return {
+        id: event.id,
+        day: new Date(event.start_at).getDate(),
+        title: event.title,
+        time: new Date(event.start_at).toLocaleTimeString('it-IT', {
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+        place: event.location || '',
+        type: event.event_type || 'training',
+        startAt: event.start_at,
+        intensity: event.intensity ?? null,
+        volume: event.volume ?? null,
+        trainingSheetPath,
+        trainingSheetUrl,
+      }
+    }),
+  )
 }
 
 const menu = [
@@ -75,8 +109,85 @@ function menuHtml() {
     .join('')
 }
 
+function startOfToday() {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return today
+}
+
+function formatLongDate(date) {
+  return new Intl.DateTimeFormat('it-IT', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(date)
+}
+
+function getUpcomingEvents() {
+  const today = startOfToday()
+  return calendarEvents.filter(
+    (event) => new Date(event.startAt) >= today,
+  )
+}
+
+function getNextTraining() {
+  return getUpcomingEvents().find(
+    (event) => event.type === 'training',
+  ) ?? null
+}
+
+function getTodayEvents() {
+  const today = startOfToday()
+  const tomorrow = new Date(today)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+
+  return calendarEvents.filter((event) => {
+    const date = new Date(event.startAt)
+    return date >= today && date < tomorrow
+  })
+}
+
+function dashboardStatsData() {
+  const nextTraining = getNextTraining()
+  const todayEvents = getTodayEvents()
+  const sheets = calendarEvents.filter(
+    (event) => event.trainingSheetPath,
+  ).length
+  const upcoming = getUpcomingEvents().length
+
+  return [
+    {
+      label: 'Prossimo allenamento',
+      value: nextTraining?.time ?? '—',
+      meta: nextTraining
+        ? `${new Date(nextTraining.startAt).toLocaleDateString('it-IT')} · ${nextTraining.place || 'Luogo non indicato'}`
+        : 'Nessun allenamento programmato',
+      icon: 'calendar',
+    },
+    {
+      label: 'Impegni di oggi',
+      value: String(todayEvents.length),
+      meta: todayEvents.length === 1 ? '1 attività programmata' : `${todayEvents.length} attività programmate`,
+      icon: 'squad',
+    },
+    {
+      label: 'Training Sheet',
+      value: String(sheets),
+      meta: 'Collegate al calendario',
+      icon: 'sheet',
+    },
+    {
+      label: 'Prossimi impegni',
+      value: String(upcoming),
+      meta: 'Da oggi in avanti',
+      icon: 'analysis',
+    },
+  ]
+}
+
 function statCards() {
-  return dashboardStats
+  return dashboardStatsData()
     .map(
       (item) => `
         <article class="stat-card">
@@ -96,6 +207,10 @@ function statCards() {
 }
 
 function dashboardView() {
+  const today = new Date()
+  const todayEvents = getTodayEvents()
+  const nextTraining = getNextTraining()
+
   return `
     <section class="view page-view">
       <div class="page-head">
@@ -108,44 +223,45 @@ function dashboardView() {
             Serie D
           </p>
         </div>
-
-        <button class="primary-action" type="button">
-          ${icon('plus')}
-          Nuovo elemento
-        </button>
       </div>
 
       <div class="stats-grid">
         ${statCards()}
       </div>
 
-      <div class="dashboard-layout">
+      <div class="dashboard-layout dashboard-layout--compact">
         <article class="panel today-panel">
           <div class="panel-head">
             <div>
               <span>OGGI</span>
-              <h2>26 Luglio 2026</h2>
+              <h2>${formatLongDate(today)}</h2>
             </div>
 
-            <strong>3 attività</strong>
+            <strong>${todayEvents.length} ${todayEvents.length === 1 ? 'attività' : 'attività'}</strong>
           </div>
 
           <div class="timeline">
-            ${todayItems
-              .map(
-                (item) => `
-                  <div class="timeline-item">
-                    <time>${item.time}</time>
-                    <i class="${item.type}"></i>
+            ${todayEvents.length
+              ? todayEvents
+                  .map(
+                    (item) => `
+                      <div class="timeline-item">
+                        <time>${item.time}</time>
+                        <i class="${item.type}"></i>
 
-                    <div>
-                      <strong>${item.title}</strong>
-                      <span>${item.meta}</span>
-                    </div>
+                        <div>
+                          <strong>${item.title}</strong>
+                          <span>${item.place || 'Luogo non indicato'}</span>
+                        </div>
+                      </div>
+                    `,
+                  )
+                  .join('')
+              : `
+                  <div class="dashboard-empty-state">
+                    Nessuna attività programmata per oggi.
                   </div>
-                `,
-              )
-              .join('')}
+                `}
           </div>
         </article>
 
@@ -153,61 +269,43 @@ function dashboardView() {
           <div class="panel-head">
             <div>
               <span>PROSSIMO ALLENAMENTO</span>
-              <h2>17:30 · Budrio</h2>
+              <h2>${nextTraining ? `${nextTraining.time} · ${nextTraining.place || 'Luogo non indicato'}` : 'Non programmato'}</h2>
             </div>
           </div>
 
           <div class="training-summary">
             <div>
-              <span>Training Sheet</span>
-              <strong>AL 004</strong>
+              <span>Data</span>
+              <strong>${nextTraining ? new Date(nextTraining.startAt).toLocaleDateString('it-IT') : '—'}</strong>
             </div>
 
             <div>
-              <span>Presenti</span>
-              <strong>26</strong>
+              <span>Training Sheet</span>
+              <strong>${nextTraining?.trainingSheetPath ? 'Presente' : '—'}</strong>
             </div>
 
             <div>
               <span>Intensità</span>
-              <strong>5/5</strong>
+              <strong>${nextTraining?.intensity ? `${nextTraining.intensity}/5` : '—'}</strong>
             </div>
 
             <div>
               <span>Volume</span>
-              <strong>4/5</strong>
+              <strong>${nextTraining?.volume ? `${nextTraining.volume}/5` : '—'}</strong>
             </div>
           </div>
 
-          <button
-            class="wide-button"
-            type="button"
-            data-open-event=""
-          >
-            Apri allenamento
-          </button>
-        </article>
-
-        <article class="panel activity-panel">
-          <div class="panel-head">
-            <div>
-              <span>ATTIVITÀ RECENTI</span>
-              <h2>Ultime modifiche</h2>
-            </div>
-          </div>
-
-          <div class="activity-list">
-            ${recentActivity
-              .map(
-                (activity) => `
-                  <div>
-                    <strong>${activity.title}</strong>
-                    <span>${activity.meta}</span>
-                  </div>
-                `,
-              )
-              .join('')}
-          </div>
+          ${nextTraining
+            ? `
+                <button
+                  class="wide-button"
+                  type="button"
+                  data-open-event="${nextTraining.id}"
+                >
+                  Apri allenamento
+                </button>
+              `
+            : ''}
         </article>
       </div>
     </section>
@@ -312,10 +410,14 @@ function calendarView() {
           </p>
         </div>
 
-        <button class="primary-action" type="button" data-new-event>
-          ${icon('plus')}
-          Nuovo evento
-        </button>
+        ${isOwner()
+          ? `
+              <button class="primary-action" type="button" data-new-event>
+                ${icon('plus')}
+                Nuovo evento
+              </button>
+            `
+          : ''}
       </div>
 
       <section class="calendar-panel">
@@ -544,14 +646,25 @@ function trainingSheetPreviewHtml(event) {
 }
 
 function drawerHtml(event) {
+  const eventDate = new Date(event.startAt)
+  const formattedDate = new Intl.DateTimeFormat('it-IT', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(eventDate)
+
   return `
     <div class="drawer-backdrop" data-close-drawer></div>
 
     <aside class="event-drawer">
       <div class="drawer-head">
         <div>
-          <span>${event.title.toUpperCase()}</span>
-          <h2>${new Date(event.startAt).toLocaleDateString('it-IT')}</h2>
+          <span class="event-type-badge event-type-badge--${event.type}">
+            ${eventTypeIcon(event.type)}
+            ${event.title.toUpperCase()}
+          </span>
+          <h2>${formattedDate} · ${event.time}</h2>
         </div>
 
         <button type="button" data-close-drawer aria-label="Chiudi">
@@ -560,9 +673,11 @@ function drawerHtml(event) {
       </div>
 
       <div class="drawer-section">
-        <label>Orario</label>
-        <strong>${event.time}</strong>
-        <small>${event.place || 'Luogo non indicato'}</small>
+        <label>Campo</label>
+        <strong class="event-location-line">
+          ${icon('calendar')}
+          ${event.place || 'Luogo non indicato'}
+        </strong>
       </div>
 
       <div class="drawer-section">
@@ -581,6 +696,7 @@ function drawerHtml(event) {
                 target="_blank"
                 rel="noopener noreferrer"
               >
+                ${icon('sheet')}
                 Apri Training Sheet
               </a>
             `
@@ -588,22 +704,26 @@ function drawerHtml(event) {
         }
       </div>
 
-      <div class="drawer-actions">
-        <button
-          type="button"
-          data-edit-event="${event.id}"
-        >
-          Modifica evento
-        </button>
+      ${isOwner()
+        ? `
+            <div class="drawer-actions">
+              <button
+                type="button"
+                data-edit-event="${event.id}"
+              >
+                Modifica evento
+              </button>
 
-        <button
-          class="drawer-delete-button"
-          type="button"
-          data-delete-event="${event.id}"
-        >
-          Elimina evento
-        </button>
-      </div>
+              <button
+                class="drawer-delete-button"
+                type="button"
+                data-delete-event="${event.id}"
+              >
+                Elimina evento
+              </button>
+            </div>
+          `
+        : ''}
     </aside>
   `
 }
@@ -659,12 +779,11 @@ function newEventModalHtml() {
           </div>
 
           <label>
-            Luogo
-            <input
-              name="location"
-              type="text"
-              placeholder="Es. Mezzolara"
-            >
+            Campo
+            <select name="location" required>
+              <option value="Mezzolara">Mezzolara</option>
+              <option value="Budrio">Budrio</option>
+            </select>
           </label>
 
           <label>
@@ -774,13 +893,15 @@ function editEventModalHtml(event) {
           </div>
 
           <label>
-            Luogo
-            <input
-              name="location"
-              type="text"
-              value="${event.place || ''}"
-              placeholder="Es. Mezzolara"
-            >
+            Campo
+            <select name="location" required>
+              <option value="Mezzolara" ${event.place === 'Mezzolara' ? 'selected' : ''}>
+                Mezzolara
+              </option>
+              <option value="Budrio" ${event.place === 'Budrio' ? 'selected' : ''}>
+                Budrio
+              </option>
+            </select>
           </label>
 
           <label>
@@ -976,7 +1097,8 @@ export function renderApp(user) {
   `
 }
 
-export async function attachAppEvents() {
+export async function attachAppEvents(user) {
+  await loadCurrentUserRole(user)
   await loadCalendarEvents()
   
   const root = document.querySelector('#viewRoot')
@@ -1033,6 +1155,7 @@ export async function attachAppEvents() {
   }
 
   function openNewEventModal() {
+    if (!isOwner()) return
     if (!modalRoot) {
       return
     }
@@ -1187,6 +1310,7 @@ export async function attachAppEvents() {
   }
 
   function openEditEventModal(eventId) {
+    if (!isOwner()) return
     const currentEvent = calendarEvents.find(
       (item) => String(item.id) === String(eventId),
     )
@@ -1321,6 +1445,7 @@ export async function attachAppEvents() {
   }
 
   async function deleteEvent(eventId) {
+    if (!isOwner()) return
     const currentEvent = calendarEvents.find(
       (item) => String(item.id) === String(eventId),
     )

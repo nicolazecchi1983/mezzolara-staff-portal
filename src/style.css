@@ -1959,3 +1959,85 @@ svg {
     grid-template-columns: 1fr 1fr;
   }
 }
+
+
+/* V5.2 SICUREZZA, RUOLI E DASHBOARD DINAMICA */
+.dashboard-layout--compact {
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+}
+
+.dashboard-empty-state {
+  padding: 28px 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.calendar-event--meeting {
+  border-left-color: #f0c94a;
+  background: rgba(128, 99, 18, 0.72);
+}
+
+.timeline-item i.meeting {
+  background: #f0c94a;
+  box-shadow: 0 0 0 4px rgba(240, 201, 74, 0.14);
+}
+
+.event-type-badge {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 7px;
+  width: fit-content;
+  padding: 6px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  font-size: 10px !important;
+  letter-spacing: 0.09em;
+}
+
+.event-type-badge svg {
+  width: 13px;
+  height: 13px;
+}
+
+.event-type-badge--training {
+  color: #83e5bd !important;
+  background: rgba(25, 139, 103, 0.14);
+}
+
+.event-type-badge--match {
+  color: #8bb2ff !important;
+  background: rgba(77, 131, 255, 0.14);
+}
+
+.event-type-badge--meeting {
+  color: #f5d86c !important;
+  background: rgba(240, 201, 74, 0.13);
+}
+
+.event-type-badge--rest {
+  color: #d5d9de !important;
+  background: rgba(185, 194, 204, 0.1);
+}
+
+.event-location-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.event-location-line svg,
+.drawer-sheet-link svg {
+  width: 16px;
+  height: 16px;
+}
+
+.drawer-sheet-link {
+  display: flex;
+  gap: 8px;
+}
+
+@media (max-width: 1050px) {
+  .dashboard-layout--compact {
+    grid-template-columns: 1fr;
+  }
+}
