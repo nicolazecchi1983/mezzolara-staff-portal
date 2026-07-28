@@ -1135,16 +1135,17 @@ export async function attachAppEvents() {
           openDrawer(button.dataset.openEvent)
         })
       })
+
+    root
+      .querySelectorAll('[data-new-event]')
+      .forEach((button) => {
+        button.addEventListener('click', (event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          openNewEventModal()
+        })
+      })
   }
-
-  document.addEventListener('click', (event) => {
-    const newEventButton = event.target.closest('[data-new-event]')
-
-    if (newEventButton) {
-      event.preventDefault()
-      openNewEventModal()
-    }
-  })
 
   document
     .querySelectorAll('.nav-item')
