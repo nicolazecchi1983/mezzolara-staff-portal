@@ -362,8 +362,13 @@ function calendarCells() {
         ? []
         : calendarEvents.filter((item) => item.day === day)
 
+      const selectedDate = `2026-07-${String(day).padStart(2, '0')}`
+
       return `
-        <div class="calendar-cell ${muted ? 'is-muted' : ''}">
+        <div
+          class="calendar-cell ${muted ? 'is-muted' : ''}"
+          ${!muted && isOwner() ? `data-create-event-date="${selectedDate}"` : ''}
+        >
           <span
             class="day-number ${
               !muted && day === 26 ? 'is-today' : ''
@@ -747,8 +752,8 @@ function drawerHtml(event) {
   `
 }
 
-function newEventModalHtml() {
-  const today = formatDateInputValue(new Date())
+function newEventModalHtml(selectedDate = formatDateInputValue(new Date())) {
+  const today = selectedDate
 
   return `
     <div class="new-event-modal-backdrop" data-close-new-event>
@@ -1234,13 +1239,13 @@ export async function attachAppEvents(user) {
     })
   }
 
-  function openNewEventModal() {
+  function openNewEventModal(selectedDate) {
     if (!isOwner()) return
     if (!modalRoot) {
       return
     }
 
-    modalRoot.innerHTML = newEventModalHtml()
+    modalRoot.innerHTML = newEventModalHtml(selectedDate)
     document.body.classList.add('new-event-modal-open')
 
     const backdrop = modalRoot.querySelector(
@@ -1681,7 +1686,9 @@ export async function attachAppEvents(user) {
     root
       .querySelectorAll('[data-open-event]')
       .forEach((button) => {
-        button.addEventListener('click', () => {
+        button.addEventListener('click', (event) => {
+          event.preventDefault()
+          event.stopPropagation()
           openDrawer(button.dataset.openEvent)
         })
       })
@@ -1693,6 +1700,14 @@ export async function attachAppEvents(user) {
           event.preventDefault()
           event.stopPropagation()
           openNewEventModal()
+        })
+      })
+
+    root
+      .querySelectorAll('[data-create-event-date]')
+      .forEach((cell) => {
+        cell.addEventListener('click', () => {
+          openNewEventModal(cell.dataset.createEventDate)
         })
       })
   }
