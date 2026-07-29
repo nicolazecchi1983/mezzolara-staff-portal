@@ -1401,7 +1401,11 @@ function profileMenuHtml(userInitial, userEmail, userName, roleLabel) {
 export function renderApp(user) {
   currentUser = user
   const userEmail = user.email ?? ''
-  const userName = user.user_metadata?.full_name || user.user_metadata?.name || 'Nicola Zecchi'
+  const emailLocalPart = userEmail.split('@')[0] || 'Utente'
+  const fallbackUserName = emailLocalPart
+    .replace(/[._-]+/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+  const userName = user.user_metadata?.full_name || user.user_metadata?.name || fallbackUserName
   const roleLabel = 'Staff'
   const userInitial =
     userEmail.charAt(0).toUpperCase() || 'N'
@@ -2167,20 +2171,20 @@ export async function attachAppEvents(user) {
       })
     })
 
-  profileMenuButton?.addEventListener(
-    'click',
-    (event) => {
-      event.stopPropagation()
-      toggleProfileMenu()
-    },
-  )
+  // Gestione robusta del menu profilo: funziona anche su touch/mobile
+  // e non dipende dal punto esatto su cui viene premuto il pulsante.
+  const handleProfileMenuToggle = (event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    toggleProfileMenu()
+  }
 
-  profileDropdown?.addEventListener(
-    'click',
-    (event) => {
-      event.stopPropagation()
-    },
-  )
+  profileMenuButton?.addEventListener('pointerup', handleProfileMenuToggle)
+
+  profileDropdown?.addEventListener('click', (event) => {
+    event.stopPropagation()
+  })
+
 
   document
     .querySelectorAll('[data-profile-action]')

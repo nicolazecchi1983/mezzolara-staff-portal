@@ -2986,3 +2986,38 @@ details[open] > summary > .library-chevron {
     font-size: 1rem;
   }
 }
+
+/* V5.5.2 — menu profilo affidabile su desktop e smartphone */
+.profile-menu-button {
+  position: relative;
+  z-index: 2;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.profile-menu-button > * {
+  pointer-events: none;
+}
+
+.profile-menu-chevron {
+  min-width: 18px;
+  text-align: center;
+}
+
+.profile-dropdown {
+  pointer-events: none;
+}
+
+.profile-dropdown.is-open {
+  pointer-events: auto;
+}
+
+@media (max-width: 760px) {
+  .profile-menu-wrapper {
+    position: static;
+  }
+
+  .profile-menu-button {
+    min-width: 48px;
+  }
+}
