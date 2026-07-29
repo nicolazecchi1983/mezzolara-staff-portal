@@ -1,0 +1,14 @@
+AGGIORNAMENTO TRAINING LIBRARY
+
+- Rimossa la voce "Training Sheet" dalla sidebar.
+- Training Library collegata alle Training Sheet presenti negli eventi Supabase.
+- Archivio automatico per mese e settimana.
+- Il mese e la settimana correnti si aprono automaticamente.
+- Le settimane a cavallo tra due mesi appartengono al mese in cui iniziano.
+- Ricerca per nome file/TS, data, tipologia e campo.
+- Apertura diretta della Training Sheet tramite il pannello evento.
+- Layout responsive per smartphone.
+- Nessun riepilogo settimanale e nessun archivio metodologico.
+
+NOTA
+Il file .env non è incluso per sicurezza. Conservare quello già presente nel progetto locale.

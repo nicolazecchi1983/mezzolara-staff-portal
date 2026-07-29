@@ -1,0 +1,13 @@
+AGGIORNAMENTO V5.5
+
+- Calendario mantenuto esclusivamente in vista mese.
+- Aggiunto pulsante OGGI: riporta al mese corrente ed evidenzia il giorno odierno.
+- Header smartphone uniformato al branding NICOLA ZECCHI / STAFF.
+- Logo e avatar mobile ridimensionati e resi più leggibili.
+- Profilo personale completato con modifica nome visualizzato.
+- Cambio password disponibile direttamente dal profilo.
+- Nessuna modifica alla Rosa.
+- Nessuna importazione Google Form/CSV implementata: richiede prima il file Google Form/Google Sheet e i nomi reali delle colonne.
+
+NOTA
+Il file .env non è incluso. Conservare quello già presente nel progetto locale.

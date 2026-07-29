@@ -8,6 +8,7 @@ import {
 
 let calendarEvents = []
 let currentUserRole = 'observer'
+let currentUser = null
 let currentCalendarDate = new Date()
 currentCalendarDate.setDate(1)
 
@@ -75,6 +76,8 @@ async function loadCalendarEvents() {
         type: event.event_type || 'training',
         startAt: event.start_at,
         matchDay: event.match_day ?? null,
+        presentCount: event.present_count ?? null,
+        squadTotal: event.squad_total ?? null,
         trainingSheetPath,
         trainingSheetUrl,
       }
@@ -85,7 +88,6 @@ async function loadCalendarEvents() {
 const menu = [
   ['dashboard', 'Dashboard'],
   ['calendar', 'Calendario'],
-  ['sheet', 'Training Sheet'],
   ['library', 'Training Library'],
   ['squad', 'Rosa'],
   ['analysis', 'Analisi Gare'],
@@ -366,7 +368,7 @@ function calendarCells() {
 
     return `
       <div
-        class="calendar-cell ${muted ? 'is-muted' : ''}"
+        class="calendar-cell ${muted ? 'is-muted' : ''} ${isToday ? 'is-today' : ''}"
         ${!muted && isOwner() ? `data-create-event-date="${dateValue}"` : ''}
       >
         <span class="day-number ${isToday ? 'is-today' : ''}">
@@ -411,6 +413,11 @@ function calendarMonthTitle() {
   return title.charAt(0).toUpperCase() + title.slice(1)
 }
 
+function goToCurrentMonth() {
+  const today = new Date()
+  currentCalendarDate = new Date(today.getFullYear(), today.getMonth(), 1)
+}
+
 function calendarView() {
   return `
     <section class="view page-view">
@@ -425,14 +432,22 @@ function calendarView() {
           </p>
         </div>
 
-        ${isOwner()
-          ? `
-              <button class="primary-action" type="button" data-new-event>
-                ${icon('plus')}
-                Nuovo evento
-              </button>
-            `
-          : ''}
+        <div class="page-head-actions calendar-page-actions">
+          <button
+            class="calendar-today-button calendar-today-button--prominent"
+            type="button"
+            data-calendar-today
+          >Oggi</button>
+
+          ${isOwner()
+            ? `
+                <button class="primary-action" type="button" data-new-event>
+                  ${icon('plus')}
+                  Nuovo evento
+                </button>
+              `
+            : ''}
+        </div>
       </div>
 
       <section class="calendar-panel">
@@ -452,6 +467,7 @@ function calendarView() {
             data-calendar-next
             aria-label="Mese successivo"
           >›</button>
+
         </div>
 
         <div class="calendar-weekdays">
@@ -572,6 +588,247 @@ function analysisView() {
   `
 }
 
+
+function startOfWeek(dateLike) {
+  const date = new Date(dateLike)
+  date.setHours(0, 0, 0, 0)
+  const mondayOffset = (date.getDay() + 6) % 7
+  date.setDate(date.getDate() - mondayOffset)
+  return date
+}
+
+function endOfWeek(dateLike) {
+  const date = startOfWeek(dateLike)
+  date.setDate(date.getDate() + 6)
+  return date
+}
+
+function dateKey(dateLike) {
+  const date = new Date(dateLike)
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-')
+}
+
+function capitalize(value) {
+  return value ? value.charAt(0).toUpperCase() + value.slice(1) : ''
+}
+
+function trainingSheetName(event) {
+  const path = String(event.trainingSheetPath ?? '')
+  const rawName = decodeURIComponent(path.split('/').pop() || '')
+    .replace(/^[0-9a-f-]{36}-/i, '')
+    .replace(/\.(png|jpe?g|webp|pdf)$/i, '')
+    .replace(/[-_]+/g, ' ')
+    .trim()
+
+  // Uniforma nomi come AL006, AL 006, AL_006 e ALL 006 29072026.
+  const codeMatch = rawName.match(/\bA(?:L|LL)\s*0*(\d{1,3})\b/i)
+  if (codeMatch) {
+    return `AL_${String(codeMatch[1]).padStart(3, '0')}`
+  }
+
+  return rawName || `TS ${new Date(event.startAt).toLocaleDateString('it-IT')}`
+}
+
+function formatSheetDate(dateLike) {
+  return new Intl.DateTimeFormat('it-IT', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(new Date(dateLike))
+}
+
+function formatWeekRange(weekStart) {
+  const start = new Date(weekStart)
+  const end = endOfWeek(start)
+  const sameMonth = start.getMonth() === end.getMonth()
+
+  const startText = new Intl.DateTimeFormat('it-IT', {
+    day: 'numeric',
+    ...(sameMonth ? {} : { month: 'long' }),
+  }).format(start)
+
+  const endText = new Intl.DateTimeFormat('it-IT', {
+    day: 'numeric',
+    month: 'long',
+  }).format(end)
+
+  return `${startText} – ${endText}`
+}
+
+function sheetTypeLabel(event) {
+  const labels = {
+    training: 'Allenamento',
+    match: 'Partita',
+    meeting: 'Riunione',
+    rest: 'Riposo',
+  }
+  return labels[event.type] ?? event.title ?? 'Allenamento'
+}
+
+function trainingLibraryGroups() {
+  const sheets = calendarEvents
+    .filter((event) => event.trainingSheetPath)
+    .sort((a, b) => new Date(b.startAt) - new Date(a.startAt))
+
+  const months = new Map()
+
+  sheets.forEach((event) => {
+    const weekStart = startOfWeek(event.startAt)
+    // Le settimane a cavallo tra due mesi appartengono al mese in cui iniziano.
+    const monthKey = `${weekStart.getFullYear()}-${String(weekStart.getMonth() + 1).padStart(2, '0')}`
+    const weekKey = dateKey(weekStart)
+
+    if (!months.has(monthKey)) {
+      months.set(monthKey, {
+        key: monthKey,
+        date: new Date(weekStart.getFullYear(), weekStart.getMonth(), 1),
+        weeks: new Map(),
+        count: 0,
+      })
+    }
+
+    const month = months.get(monthKey)
+    if (!month.weeks.has(weekKey)) {
+      month.weeks.set(weekKey, {
+        key: weekKey,
+        start: weekStart,
+        items: [],
+      })
+    }
+
+    month.weeks.get(weekKey).items.push(event)
+    month.count += 1
+  })
+
+  return Array.from(months.values())
+    .sort((a, b) => b.date - a.date)
+    .map((month) => ({
+      ...month,
+      weeks: Array.from(month.weeks.values()).sort((a, b) => b.start - a.start),
+    }))
+}
+
+function trainingLibraryView() {
+  const groups = trainingLibraryGroups()
+  const currentWeekKey = dateKey(startOfWeek(new Date()))
+  const currentMonthKey = `${startOfWeek(new Date()).getFullYear()}-${String(startOfWeek(new Date()).getMonth() + 1).padStart(2, '0')}`
+
+  return `
+    <section class="view page-view training-library-view">
+      <div class="page-head training-library-head">
+        <div>
+          <h1>Training Library</h1>
+          <p>Archivio delle Training Sheet della stagione.</p>
+        </div>
+
+        ${isOwner()
+          ? `
+              <button class="primary-action" type="button" data-new-event>
+                ${icon('plus')}
+                Nuova Training Sheet
+              </button>
+            `
+          : ''}
+      </div>
+
+      <div class="library-search-wrap">
+        <span class="library-search-icon">${icon('search')}</span>
+        <input
+          class="library-search"
+          type="search"
+          placeholder="Cerca per nome, data, tipologia o campo..."
+          aria-label="Cerca Training Sheet"
+          data-library-search
+        >
+      </div>
+
+      <div class="training-library" data-library-root>
+        ${groups.length
+          ? groups.map((month) => {
+              const monthTitle = capitalize(new Intl.DateTimeFormat('it-IT', {
+                month: 'long',
+                year: 'numeric',
+              }).format(month.date))
+              const monthOpen = month.key === currentMonthKey
+
+              return `
+                <details class="library-month" ${monthOpen ? 'open' : ''} data-library-month>
+                  <summary>
+                    <span class="library-folder-icon">${icon('library')}</span>
+                    <strong>${monthTitle}</strong>
+                    <span class="library-count">${month.count}</span>
+                    <span class="library-chevron">⌄</span>
+                  </summary>
+
+                  <div class="library-month-content">
+                    ${month.weeks.map((week) => {
+                      const weekOpen = week.key === currentWeekKey
+                      return `
+                        <details class="library-week" ${weekOpen ? 'open' : ''} data-library-week>
+                          <summary>
+                            <span>
+                              <strong>${formatWeekRange(week.start)}</strong>
+                              <small>${week.items.length} ${week.items.length === 1 ? 'Training Sheet' : 'Training Sheet'}</small>
+                            </span>
+                            <span class="library-chevron">⌄</span>
+                          </summary>
+
+                          <div class="library-sheet-list">
+                            ${week.items.map((event) => {
+                              const name = trainingSheetName(event)
+                              const searchText = [
+                                name,
+                                formatSheetDate(event.startAt),
+                                sheetTypeLabel(event),
+                                event.place || '',
+                              ].join(' ').toLocaleLowerCase('it-IT')
+
+                              return `
+                                <article class="library-sheet-card" data-library-sheet data-search-text="${searchText.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">
+                                  <div class="library-sheet-mark">${icon('sheet')}</div>
+                                  <div class="library-sheet-main">
+                                    <h3>${name}</h3>
+                                    <div class="library-sheet-meta">
+                                      <span>${formatSheetDate(event.startAt)}</span>
+                                      <span>${sheetTypeLabel(event)}</span>
+                                      <span>${event.place || 'Campo non indicato'}</span>
+                                      <span>Presenti ${event.presentCount ?? '—'}${event.squadTotal ? `/${event.squadTotal}` : ''}</span>
+                                    </div>
+                                  </div>
+                                  <button class="library-open-button" type="button" data-open-event="${event.id}">
+                                    Apri
+                                  </button>
+                                </article>
+                              `
+                            }).join('')}
+                          </div>
+                        </details>
+                      `
+                    }).join('')}
+                  </div>
+                </details>
+              `
+            }).join('')
+          : `
+              <div class="library-empty-state">
+                <div>${icon('sheet')}</div>
+                <h2>Nessuna Training Sheet</h2>
+                <p>Le Training Sheet collegate agli allenamenti compariranno qui automaticamente.</p>
+              </div>
+            `}
+      </div>
+
+      <div class="library-no-results" data-library-no-results hidden>
+        Nessuna Training Sheet corrisponde alla ricerca.
+      </div>
+    </section>
+  `
+}
+
 function placeholderView(title) {
   return `
     <section class="view page-view">
@@ -600,27 +857,57 @@ function placeholderView(title) {
 }
 
 function profileView() {
+  const metadata = currentUser?.user_metadata ?? {}
+  const fullName = metadata.full_name || metadata.name || 'Nicola Zecchi'
+  const email = currentUser?.email ?? ''
+  const roleLabel = currentUserRole === 'owner' ? 'Amministratore' : 'Osservatore'
+
   return `
     <section class="view page-view">
       <div class="page-head">
         <div>
-          <h1>Profilo</h1>
-
-          <p>
-            <span>ACCOUNT PERSONALE</span>
-            <b>•</b>
-            Nicola Zecchi
-          </p>
+          <h1>Il mio profilo</h1>
+          <p><span>ACCOUNT PERSONALE</span><b>•</b>${roleLabel}</p>
         </div>
       </div>
 
-      <div class="placeholder-panel">
-        <h2>Nicola Zecchi</h2>
+      <div class="profile-page-grid">
+        <form class="profile-card" data-profile-form>
+          <div class="profile-card-head">
+            <span class="profile-page-avatar">${fullName.charAt(0).toUpperCase()}</span>
+            <div><h2>Dati personali</h2><p>Aggiorna il nome mostrato nel portale.</p></div>
+          </div>
+          <label class="form-field">
+            <span>Nome e cognome</span>
+            <input name="full_name" value="${fullName}" autocomplete="name" required>
+          </label>
+          <label class="form-field">
+            <span>Email</span>
+            <input value="${email}" type="email" disabled>
+          </label>
+          <label class="form-field">
+            <span>Ruolo</span>
+            <input value="${roleLabel}" disabled>
+          </label>
+          <p class="form-message" data-profile-message></p>
+          <button class="primary-action" type="submit">Salva profilo</button>
+        </form>
 
-        <p>
-          Qui potrai gestire i dati personali, il ruolo nello staff,
-          la foto profilo e le preferenze dell’account.
-        </p>
+        <form class="profile-card" data-password-form>
+          <div class="profile-card-head">
+            <div><h2>Cambia password</h2><p>Usa almeno 8 caratteri.</p></div>
+          </div>
+          <label class="form-field">
+            <span>Nuova password</span>
+            <input name="password" type="password" minlength="8" autocomplete="new-password" required>
+          </label>
+          <label class="form-field">
+            <span>Conferma nuova password</span>
+            <input name="password_confirm" type="password" minlength="8" autocomplete="new-password" required>
+          </label>
+          <p class="form-message" data-password-message></p>
+          <button class="primary-action" type="submit">Aggiorna password</button>
+        </form>
       </div>
     </section>
   `
@@ -683,15 +970,24 @@ function drawerHtml(event) {
       </div>
 
       <div class="drawer-section">
-        <label>Campo</label>
-        <strong class="event-location-line">
-          ${icon('location')}
-          ${event.place || 'Luogo non indicato'}
-        </strong>
+        <div class="event-info-grid">
+          <div class="event-info-card">
+            <span>Campo</span>
+            <strong class="event-info-card__value">
+              <i class="event-info-card__icon">${icon('location')}</i>
+              ${event.place || 'Non indicato'}
+            </strong>
+          </div>
 
-        ${isTrainingEventType(event.type)
-          ? `<strong class="event-md-line"><span>MD</span>${event.matchDay || 'Nessuno'}</strong>`
-          : ''}
+          ${isTrainingEventType(event.type)
+            ? `
+                <div class="event-info-card">
+                  <span>Match Day</span>
+                  <strong class="event-info-card__value">${event.matchDay || 'Nessuno'}</strong>
+                </div>
+              `
+            : ''}
+        </div>
       </div>
 
       ${isTrainingEventType(event.type)
@@ -702,7 +998,9 @@ function drawerHtml(event) {
               <div class="training-sheet-meta">
                 <div><span>Data</span><strong>${eventDate.toLocaleDateString('it-IT')}</strong></div>
                 <div><span>Ora</span><strong>${event.time}</strong></div>
-                <div><span>MD</span><strong>${event.matchDay || 'Nessuno'}</strong></div>
+                <div><span>Campo</span><strong>${event.place || 'Non indicato'}</strong></div>
+                <div><span>Match Day</span><strong>${event.matchDay || 'Nessuno'}</strong></div>
+                <div><span>Presenti</span><strong>${event.presentCount ?? '—'}${event.squadTotal ? `/${event.squadTotal}` : ''}</strong></div>
               </div>
 
               <div class="training-sheet-preview-wrap">
@@ -821,6 +1119,17 @@ function newEventModalHtml(selectedDate = formatDateInputValue(new Date())) {
               <option value="MD+3">MD+3</option>
             </select>
           </label>
+
+          <div class="new-event-form__row" data-attendance-fields>
+            <label>
+              Presenti
+              <input name="presentCount" type="number" min="0" max="99" inputmode="numeric" placeholder="25">
+            </label>
+            <label>
+              Totale rosa
+              <input name="squadTotal" type="number" min="1" max="99" inputmode="numeric" placeholder="28">
+            </label>
+          </div>
 
           <label data-training-sheet-field>
             Training Sheet
@@ -954,6 +1263,17 @@ function editEventModalHtml(event) {
             </select>
           </label>
 
+          <div class="new-event-form__row" data-attendance-fields ${isTrainingEventType(event.type) ? '' : 'hidden'}>
+            <label>
+              Presenti
+              <input name="presentCount" type="number" min="0" max="99" inputmode="numeric" value="${event.presentCount ?? ''}" placeholder="25">
+            </label>
+            <label>
+              Totale rosa
+              <input name="squadTotal" type="number" min="1" max="99" inputmode="numeric" value="${event.squadTotal ?? ''}" placeholder="28">
+            </label>
+          </div>
+
           <label
             data-training-sheet-field
             ${isTrainingEventType(event.type) ? '' : 'hidden'}
@@ -998,7 +1318,7 @@ function editEventModalHtml(event) {
   `
 }
 
-function profileMenuHtml(userInitial, userEmail) {
+function profileMenuHtml(userInitial, userEmail, userName, roleLabel) {
   return `
     <div class="profile-menu-wrapper">
       <button
@@ -1014,8 +1334,8 @@ function profileMenuHtml(userInitial, userEmail) {
         </span>
 
         <span class="profile-menu-identity">
-          <strong>Nicola Zecchi</strong>
-          <small>Staff</small>
+          <strong>${userName}</strong>
+          <small>${roleLabel}</small>
         </span>
 
         <span
@@ -1038,7 +1358,7 @@ function profileMenuHtml(userInitial, userEmail) {
           </span>
 
           <div>
-            <strong>Nicola Zecchi</strong>
+            <strong>${userName}</strong>
             <span>${userEmail}</span>
           </div>
         </div>
@@ -1079,7 +1399,10 @@ function profileMenuHtml(userInitial, userEmail) {
 }
 
 export function renderApp(user) {
+  currentUser = user
   const userEmail = user.email ?? ''
+  const userName = user.user_metadata?.full_name || user.user_metadata?.name || 'Nicola Zecchi'
+  const roleLabel = 'Staff'
   const userInitial =
     userEmail.charAt(0).toUpperCase() || 'N'
 
@@ -1111,12 +1434,12 @@ export function renderApp(user) {
             </span>
 
             <div>
-              <strong>NZ</strong>
-              <span>Coach Portal</span>
+              <strong>NICOLA ZECCHI</strong>
+              <span>STAFF</span>
             </div>
           </div>
 
-          ${profileMenuHtml(userInitial, userEmail)}
+          ${profileMenuHtml(userInitial, userEmail, userName, roleLabel)}
         </header>
 
         <main id="viewRoot">
@@ -1131,6 +1454,7 @@ export function renderApp(user) {
 }
 
 export async function attachAppEvents(user) {
+  currentUser = user
   await loadCurrentUserRole(user)
   await loadCalendarEvents()
   
@@ -1164,13 +1488,14 @@ export async function attachAppEvents(user) {
   document.body.classList.remove('drawer-open', 'new-event-modal-open')
   document.body.style.removeProperty('overflow')
 
-  if (key === 'calendar' || key === 'dashboard') {
+  if (key === 'calendar' || key === 'dashboard' || key === 'library') {
     await loadCalendarEvents()
   }
 
   const views = {
     dashboard: dashboardView,
     calendar: calendarView,
+    library: trainingLibraryView,
     squad: squadView,
     analysis: analysisView,
     profile: profileView,
@@ -1204,6 +1529,7 @@ export async function attachAppEvents(user) {
     const trainingSheetInput = form?.querySelector('[name="trainingSheet"]')
     const mdField = form?.querySelector('[data-md-field]')
     const mdSelect = form?.querySelector('[name="matchDay"]')
+    const attendanceFields = form?.querySelector('[data-attendance-fields]')
 
     if (!typeSelect || !trainingSheetField) return
 
@@ -1211,6 +1537,7 @@ export async function attachAppEvents(user) {
       const showTrainingSheet = isTrainingEventType(typeSelect.value)
       trainingSheetField.hidden = !showTrainingSheet
       if (mdField) mdField.hidden = !showTrainingSheet
+      if (attendanceFields) attendanceFields.hidden = !showTrainingSheet
 
       if (!showTrainingSheet && trainingSheetInput) {
         trainingSheetInput.value = ''
@@ -1289,6 +1616,17 @@ export async function attachAppEvents(user) {
       const matchDay = isTrainingEventType(eventType)
         ? String(formData.get('matchDay') ?? '').trim() || null
         : null
+      const presentCount = isTrainingEventType(eventType) && formData.get('presentCount') !== ''
+        ? Number(formData.get('presentCount'))
+        : null
+      const squadTotal = isTrainingEventType(eventType) && formData.get('squadTotal') !== ''
+        ? Number(formData.get('squadTotal'))
+        : null
+
+      if (presentCount !== null && squadTotal !== null && presentCount > squadTotal) {
+        message.textContent = 'I presenti non possono superare il totale rosa.'
+        return
+      }
 
       if (!date || !time) {
         message.textContent = 'Inserisci data e ora.'
@@ -1350,6 +1688,8 @@ export async function attachAppEvents(user) {
           start_at: startAt,
           location: location || null,
           match_day: matchDay,
+          present_count: presentCount,
+          squad_total: squadTotal,
           training_sheet_path: filePath,
         })
 
@@ -1459,6 +1799,17 @@ export async function attachAppEvents(user) {
       const matchDay = isTrainingEventType(eventType)
         ? String(formData.get('matchDay') ?? '').trim() || null
         : null
+      const presentCount = isTrainingEventType(eventType) && formData.get('presentCount') !== ''
+        ? Number(formData.get('presentCount'))
+        : null
+      const squadTotal = isTrainingEventType(eventType) && formData.get('squadTotal') !== ''
+        ? Number(formData.get('squadTotal'))
+        : null
+
+      if (presentCount !== null && squadTotal !== null && presentCount > squadTotal) {
+        message.textContent = 'I presenti non possono superare il totale rosa.'
+        return
+      }
 
       if (!date || !time) {
         message.textContent = 'Inserisci data e ora.'
@@ -1513,6 +1864,8 @@ export async function attachAppEvents(user) {
           start_at: startAt,
           location: location || null,
           match_day: matchDay,
+          present_count: presentCount,
+          squad_total: squadTotal,
           training_sheet_path: nextFilePath,
         })
         .eq('id', currentEvent.id)
@@ -1728,6 +2081,76 @@ export async function attachAppEvents(user) {
       )
       root.innerHTML = calendarView()
       bindDynamic()
+    })
+
+    root.querySelector('[data-calendar-today]')?.addEventListener('click', () => {
+      goToCurrentMonth()
+      root.innerHTML = calendarView()
+      bindDynamic()
+      const todayCell = root.querySelector('.calendar-cell.is-today')
+      todayCell?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    })
+
+    root.querySelector('[data-profile-form]')?.addEventListener('submit', async (event) => {
+      event.preventDefault()
+      const form = event.currentTarget
+      const message = form.querySelector('[data-profile-message]')
+      const fullName = new FormData(form).get('full_name')?.toString().trim()
+      if (!fullName) return
+      const { data, error } = await supabase.auth.updateUser({ data: { full_name: fullName } })
+      if (error) { message.textContent = error.message; message.className = 'form-message is-error'; return }
+      currentUser = data.user
+      message.textContent = 'Profilo aggiornato.'
+      message.className = 'form-message is-success'
+      const topName = document.querySelector('.profile-menu-identity strong')
+      const dropName = document.querySelector('.profile-dropdown-head strong')
+      if (topName) topName.textContent = fullName
+      if (dropName) dropName.textContent = fullName
+    })
+
+    root.querySelector('[data-password-form]')?.addEventListener('submit', async (event) => {
+      event.preventDefault()
+      const form = event.currentTarget
+      const data = new FormData(form)
+      const password = data.get('password')?.toString() ?? ''
+      const confirmation = data.get('password_confirm')?.toString() ?? ''
+      const message = form.querySelector('[data-password-message]')
+      if (password !== confirmation) { message.textContent = 'Le password non coincidono.'; message.className = 'form-message is-error'; return }
+      const { error } = await supabase.auth.updateUser({ password })
+      if (error) { message.textContent = error.message; message.className = 'form-message is-error'; return }
+      form.reset()
+      message.textContent = 'Password aggiornata.'
+      message.className = 'form-message is-success'
+    })
+
+
+    root.querySelector('[data-library-search]')?.addEventListener('input', (event) => {
+      const query = event.currentTarget.value.trim().toLocaleLowerCase('it-IT')
+      const libraryRoot = root.querySelector('[data-library-root]')
+      const noResults = root.querySelector('[data-library-no-results]')
+      let visibleSheets = 0
+
+      libraryRoot?.querySelectorAll('[data-library-sheet]').forEach((card) => {
+        const matches = !query || card.dataset.searchText.includes(query)
+        card.hidden = !matches
+        if (matches) visibleSheets += 1
+      })
+
+      libraryRoot?.querySelectorAll('[data-library-week]').forEach((week) => {
+        const hasVisibleSheets = Array.from(week.querySelectorAll('[data-library-sheet]'))
+          .some((card) => !card.hidden)
+        week.hidden = !hasVisibleSheets
+        if (query && hasVisibleSheets) week.open = true
+      })
+
+      libraryRoot?.querySelectorAll('[data-library-month]').forEach((month) => {
+        const hasVisibleWeeks = Array.from(month.querySelectorAll('[data-library-week]'))
+          .some((week) => !week.hidden)
+        month.hidden = !hasVisibleWeeks
+        if (query && hasVisibleWeeks) month.open = true
+      })
+
+      if (noResults) noResults.hidden = visibleSheets > 0 || !query
     })
   }
 

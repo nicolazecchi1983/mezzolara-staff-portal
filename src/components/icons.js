@@ -12,6 +12,7 @@ export function icon(name) {
     plus: '<path d="M12 5v14M5 12h14"/>',
     close: '<path d="m6 6 12 12M18 6 6 18"/>',
     location: '<path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/>',
+    search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
   }
   return `<svg viewBox="0 0 24 24" aria-hidden="true">${icons[name] ?? ''}</svg>`
 }
