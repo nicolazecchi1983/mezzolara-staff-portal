@@ -11,6 +11,7 @@ let currentUserRole = 'observer'
 let currentUser = null
 let currentUserProfile = null
 let staffProfiles = []
+let analysisEntries = []
 let currentCalendarDate = new Date()
 currentCalendarDate.setDate(1)
 
@@ -82,6 +83,22 @@ async function loadCurrentUserRole(user) {
     await supabase.auth.signOut()
     throw new Error('Account disattivato')
   }
+}
+
+async function loadAnalysisEntries() {
+  const { data, error } = await supabase
+    .from('match_analysis')
+    .select('*')
+    .order('match_date', { ascending: false })
+    .order('minute', { ascending: true })
+
+  if (error) {
+    console.warn('Analisi gare non ancora collegata:', error.message)
+    analysisEntries = []
+    return
+  }
+
+  analysisEntries = data ?? []
 }
 
 async function loadStaffProfiles() {
@@ -625,46 +642,73 @@ function squadView() {
   `
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+}
+
+function analysisOutcomeClass(value) {
+  const normalized = String(value ?? '').toLocaleLowerCase('it-IT')
+  return normalized.includes('positivo') ? 'is-positive' : 'is-improve'
+}
+
 function analysisView() {
+  const items = analysisEntries.map((entry) => `
+    <article class="match-analysis-row">
+      <div class="match-analysis-minute">${entry.minute ? `${escapeHtml(entry.minute)}'` : '—'}</div>
+      <div class="match-analysis-content">
+        <div class="match-analysis-topline">
+          <strong>${escapeHtml(entry.match_name || 'Partita non indicata')}</strong>
+          <span class="analysis-outcome ${analysisOutcomeClass(entry.outcome)}">${escapeHtml(entry.outcome || 'Da classificare')}</span>
+        </div>
+        <p>${escapeHtml(entry.observation || 'Nessuna osservazione')}</p>
+        <div class="match-analysis-meta">
+          <span>${escapeHtml(entry.observer || 'Osservatore non indicato')}</span>
+          <span>${escapeHtml(entry.game_phase || 'Fase non indicata')}</span>
+          <span>${entry.match_date ? new Date(entry.match_date).toLocaleDateString('it-IT') : 'Data non indicata'}</span>
+        </div>
+      </div>
+    </article>
+  `).join('')
+
   return `
-    <section class="view page-view">
-      <div class="page-head">
+    <section class="view page-view analysis-view">
+      <div class="page-head analysis-page-head">
         <div>
           <h1>Analisi Gare</h1>
-
-          <p>
-            <span>VIDEO E CLIP</span>
-            <b>•</b>
-            Stagione 2026/27
-          </p>
+          <p><span>OSSERVAZIONI PARTITA</span><b>•</b>Google Form + Supabase</p>
         </div>
-
-        <button class="primary-action" type="button">
-          ${icon('plus')}
-          Nuova analisi
-        </button>
+        <div class="page-actions analysis-actions">
+          <a class="ghost-button analysis-form-link" href="https://docs.google.com/forms/d/1dMx3J-lz8loospyKAx8Fdfi0oh0W1cGkUFZBMu6U_WU/edit" target="_blank" rel="noopener noreferrer">Apri Google Form</a>
+          ${isOwner() ? `<button class="primary-action" type="button" data-import-analysis>Importa CSV</button>` : ''}
+          <input type="file" accept=".csv,text/csv" data-analysis-file hidden>
+        </div>
       </div>
 
-      <div class="analysis-grid">
-        ${analysisItems
-          .map(
-            (analysis) => `
-              <article class="analysis-card">
-                <div class="video-placeholder">
-                  ${icon('analysis')}
-                </div>
-
-                <div class="analysis-copy">
-                  <span>${analysis.date}</span>
-                  <h3>Mezzolara · ${analysis.opponent}</h3>
-                  <p>${analysis.clips} clip · ${analysis.tag}</p>
-                  <strong>${analysis.status}</strong>
-                </div>
-              </article>
-            `,
-          )
-          .join('')}
+      <div class="analysis-embryo-note">
+        <strong>Prima versione operativa</strong>
+        <span>Compila il Google Form. Scarica il foglio risposte in CSV e importalo qui: le osservazioni vengono archiviate e ordinate per partita e minuto.</span>
       </div>
+
+      <div class="analysis-toolbar">
+        <input type="search" placeholder="Cerca partita, osservatore, fase o testo..." data-analysis-search>
+        <span data-analysis-count>${analysisEntries.length} osservazioni</span>
+      </div>
+
+      <div class="match-analysis-list" data-analysis-list>
+        ${items || `
+          <div class="analysis-empty-state">
+            <div>${icon('analysis')}</div>
+            <h2>Nessuna analisi importata</h2>
+            <p>Le risposte del Google Form compariranno qui dopo l'importazione del CSV.</p>
+          </div>
+        `}
+      </div>
+      <p class="form-message" data-analysis-message></p>
     </section>
   `
 }
@@ -996,6 +1040,30 @@ function profileView() {
           <p class="form-message" data-password-message></p>
           <button class="primary-action" type="submit">Aggiorna password</button>
         </form>
+      </div>
+    </section>
+  `
+}
+
+function settingsView() {
+  return `
+    <section class="view page-view settings-view">
+      <div class="page-head">
+        <div><h1>Impostazioni</h1><p><span>PORTALE</span><b>•</b>Configurazione e accessi</p></div>
+      </div>
+      <div class="settings-grid">
+        ${isOwner() ? `
+          <button class="settings-card" type="button" data-open-staff>
+            <span class="settings-card-icon">${icon('squad')}</span>
+            <span><strong>Gestione Staff</strong><small>Crea, modifica ruoli e gestisci gli accessi.</small></span>
+            <b>→</b>
+          </button>
+        ` : ''}
+        <button class="settings-card" type="button" data-open-profile>
+          <span class="settings-card-icon">${icon('settings')}</span>
+          <span><strong>Il mio profilo</strong><small>Nome, cognome e password personale.</small></span>
+          <b>→</b>
+        </button>
       </div>
     </section>
   `
@@ -1611,6 +1679,39 @@ export function renderApp(user) {
   `
 }
 
+function normalizeCsvHeader(value) {
+  return String(value ?? '').trim().toLocaleLowerCase('it-IT')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+}
+
+function parseCsv(text) {
+  const rows = []
+  let row = []
+  let value = ''
+  let quoted = false
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i]
+    if (quoted) {
+      if (char === '"' && text[i + 1] === '"') { value += '"'; i += 1 }
+      else if (char === '"') quoted = false
+      else value += char
+    } else if (char === '"') quoted = true
+    else if (char === ',') { row.push(value); value = '' }
+    else if (char === '\n') { row.push(value.replace(/\r$/, '')); rows.push(row); row = []; value = '' }
+    else value += char
+  }
+  if (value || row.length) { row.push(value.replace(/\r$/, '')); rows.push(row) }
+  return rows
+}
+
+function parseItalianDate(value) {
+  const text = String(value ?? '').trim()
+  const match = text.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/)
+  if (match) return `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`
+  const date = new Date(text)
+  return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10)
+}
+
 export async function attachAppEvents(user) {
   currentUser = user
   await loadCurrentUserRole(user)
@@ -1651,8 +1752,12 @@ export async function attachAppEvents(user) {
     await loadCalendarEvents()
   }
 
-  if (key === 'settings') {
+  if (key === 'staff') {
     await loadStaffProfiles()
+  }
+
+  if (key === 'analysis') {
+    await loadAnalysisEntries()
   }
 
   const views = {
@@ -1662,7 +1767,8 @@ export async function attachAppEvents(user) {
     squad: squadView,
     analysis: analysisView,
     profile: profileView,
-    settings: staffManagementView,
+    settings: settingsView,
+    staff: staffManagementView,
   }
 
   root.innerHTML = views[key]
@@ -2288,6 +2394,75 @@ export async function attachAppEvents(user) {
       syncProfileHeader()
       message.textContent = 'Profilo aggiornato.'
       message.className = 'form-message is-success'
+    })
+
+    root.querySelector('[data-open-staff]')?.addEventListener('click', async () => {
+      await setView('staff', 'Gestione Staff')
+    })
+
+    root.querySelector('[data-open-profile]')?.addEventListener('click', async () => {
+      await setView('profile', 'Profilo')
+    })
+
+    const analysisImportButton = root.querySelector('[data-import-analysis]')
+    const analysisFileInput = root.querySelector('[data-analysis-file]')
+    analysisImportButton?.addEventListener('click', () => analysisFileInput?.click())
+
+    analysisFileInput?.addEventListener('change', async (event) => {
+      const file = event.currentTarget.files?.[0]
+      const message = root.querySelector('[data-analysis-message]')
+      if (!file) return
+      try {
+        const text = await file.text()
+        const rows = parseCsv(text)
+        if (rows.length < 2) throw new Error('Il CSV non contiene risposte.')
+        const headers = rows[0].map(normalizeCsvHeader)
+        const records = rows.slice(1).filter(row => row.some(cell => String(cell).trim())).map((row) => {
+          const obj = Object.fromEntries(headers.map((header, index) => [header, row[index] ?? '']))
+          const pick = (...keys) => {
+            for (const key of keys) {
+              const found = headers.find(header => header.includes(key))
+              if (found && obj[found]) return String(obj[found]).trim()
+            }
+            return ''
+          }
+          const rawDate = pick('data della gara', 'data gara', 'data')
+          return {
+            observer: pick('nome osservatore', 'osservatore', 'nome'),
+            match_date: parseItalianDate(rawDate),
+            match_name: pick('partita analizzata', 'partita', 'gara'),
+            minute: pick('minuto evento', 'minuto'),
+            game_phase: pick('fase del gioco', 'fase di gioco', 'fase'),
+            outcome: pick('esito'),
+            observation: pick('osservazione riscontrata', 'osservazione', 'descrizione'),
+            raw_data: obj,
+          }
+        })
+        const { error } = await supabase.from('match_analysis').insert(records)
+        if (error) throw error
+        message.textContent = `${records.length} osservazioni importate.`
+        message.className = 'form-message is-success'
+        await loadAnalysisEntries()
+        root.innerHTML = analysisView()
+        bindDynamic()
+      } catch (error) {
+        message.textContent = error.message || 'Importazione non riuscita.'
+        message.className = 'form-message is-error'
+      } finally {
+        event.currentTarget.value = ''
+      }
+    })
+
+    root.querySelector('[data-analysis-search]')?.addEventListener('input', (event) => {
+      const query = event.currentTarget.value.trim().toLocaleLowerCase('it-IT')
+      let visible = 0
+      root.querySelectorAll('.match-analysis-row').forEach((row) => {
+        const match = row.textContent.toLocaleLowerCase('it-IT').includes(query)
+        row.hidden = !match
+        if (match) visible += 1
+      })
+      const count = root.querySelector('[data-analysis-count]')
+      if (count) count.textContent = `${visible} osservazioni`
     })
 
     root.querySelectorAll('[data-staff-form]').forEach((form) => {
