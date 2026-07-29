@@ -1,0 +1,7 @@
+AGGIORNAMENTO V5.5.6
+
+- Reso stabile il menu profilo su smartphone usando pointerdown con fallback click.
+- Impedito il doppio toggle tra pointerdown e click.
+- Resa cliccabile tutta l’area del profilo.
+- Corretta l’iniziale N negli avatar della barra e del menu profilo.
+- Nessuna modifica SQL necessaria.

@@ -9,6 +9,8 @@ import {
 let calendarEvents = []
 let currentUserRole = 'observer'
 let currentUser = null
+let currentUserProfile = null
+let staffProfiles = []
 let currentCalendarDate = new Date()
 currentCalendarDate.setDate(1)
 
@@ -16,25 +18,104 @@ function isOwner() {
   return currentUserRole === 'owner'
 }
 
+function roleLabel(role) {
+  const labels = {
+    owner: 'Amministratore',
+    coach: 'Allenatore',
+    assistant: 'Vice allenatore',
+    athletic_coach: 'Preparatore fisico',
+    goalkeeper_coach: 'Preparatore portieri',
+    analyst: 'Match analyst',
+    observer: 'Osservatore',
+    physio: 'Fisioterapista',
+    collaborator: 'Collaboratore',
+    sporting_director: 'Direttore sportivo',
+    read_only: 'Solo lettura',
+  }
+
+  return labels[role] ?? 'Staff'
+}
+
+function profileFullName(profile, user = currentUser) {
+  const joined = [profile?.first_name, profile?.last_name]
+    .filter(Boolean)
+    .join(' ')
+    .trim()
+
+  if (joined) return joined
+
+  const metadataName = user?.user_metadata?.full_name || user?.user_metadata?.name
+  if (metadataName) return metadataName
+
+  const localPart = user?.email?.split('@')[0] || 'Utente'
+  return localPart
+    .replace(/\d+$/g, '')
+    .replace(/[._-]+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase()) || 'Utente'
+}
+
 async function loadCurrentUserRole(user) {
   if (!user?.id) {
     currentUserRole = 'observer'
+    currentUserProfile = null
     return
   }
 
   const { data, error } = await supabase
     .from('profiles')
-    .select('role')
+    .select('id, first_name, last_name, email, role, active')
     .eq('id', user.id)
     .maybeSingle()
 
   if (error) {
-    console.error('Errore caricamento ruolo:', error.message)
+    console.error('Errore caricamento profilo:', error.message)
     currentUserRole = 'observer'
+    currentUserProfile = null
     return
   }
 
+  currentUserProfile = data ?? null
   currentUserRole = data?.role ?? 'observer'
+
+  if (data?.active === false) {
+    await supabase.auth.signOut()
+    throw new Error('Account disattivato')
+  }
+}
+
+async function loadStaffProfiles() {
+  if (!isOwner()) {
+    staffProfiles = []
+    return
+  }
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, first_name, last_name, email, role, active, updated_at')
+    .order('first_name', { ascending: true })
+    .order('last_name', { ascending: true })
+
+  if (error) {
+    console.error('Errore caricamento staff:', error.message)
+    staffProfiles = []
+    return
+  }
+
+  staffProfiles = data ?? []
+}
+
+function syncProfileHeader() {
+  const name = profileFullName(currentUserProfile)
+  const initial = name.charAt(0).toUpperCase() || 'N'
+  const label = roleLabel(currentUserRole)
+
+  document.querySelectorAll('.profile-menu-identity strong, .profile-dropdown-head strong')
+    .forEach((node) => { node.textContent = name })
+  document.querySelectorAll('.profile-menu-identity small')
+    .forEach((node) => { node.textContent = label })
+  document.querySelectorAll('.avatar-initial')
+    .forEach((node) => { node.textContent = initial })
 }
 
 async function loadCalendarEvents() {
@@ -857,17 +938,18 @@ function placeholderView(title) {
 }
 
 function profileView() {
-  const metadata = currentUser?.user_metadata ?? {}
-  const fullName = metadata.full_name || metadata.name || 'Nicola Zecchi'
-  const email = currentUser?.email ?? ''
-  const roleLabel = currentUserRole === 'owner' ? 'Amministratore' : 'Osservatore'
+  const email = currentUserProfile?.email || currentUser?.email || ''
+  const firstName = currentUserProfile?.first_name || ''
+  const lastName = currentUserProfile?.last_name || ''
+  const fullName = profileFullName(currentUserProfile)
+  const currentRoleLabel = roleLabel(currentUserRole)
 
   return `
     <section class="view page-view">
       <div class="page-head">
         <div>
           <h1>Il mio profilo</h1>
-          <p><span>ACCOUNT PERSONALE</span><b>•</b>${roleLabel}</p>
+          <p><span>ACCOUNT PERSONALE</span><b>•</b>${currentRoleLabel}</p>
         </div>
       </div>
 
@@ -875,19 +957,25 @@ function profileView() {
         <form class="profile-card" data-profile-form>
           <div class="profile-card-head">
             <span class="profile-page-avatar">${fullName.charAt(0).toUpperCase()}</span>
-            <div><h2>Dati personali</h2><p>Aggiorna il nome mostrato nel portale.</p></div>
+            <div><h2>Dati personali</h2><p>Aggiorna nome e cognome mostrati nel portale.</p></div>
           </div>
-          <label class="form-field">
-            <span>Nome e cognome</span>
-            <input name="full_name" value="${fullName}" autocomplete="name" required>
-          </label>
+          <div class="profile-name-grid">
+            <label class="form-field">
+              <span>Nome</span>
+              <input name="first_name" value="${firstName}" autocomplete="given-name" required>
+            </label>
+            <label class="form-field">
+              <span>Cognome</span>
+              <input name="last_name" value="${lastName}" autocomplete="family-name" required>
+            </label>
+          </div>
           <label class="form-field">
             <span>Email</span>
             <input value="${email}" type="email" disabled>
           </label>
           <label class="form-field">
             <span>Ruolo</span>
-            <input value="${roleLabel}" disabled>
+            <input value="${currentRoleLabel}" disabled>
           </label>
           <p class="form-message" data-profile-message></p>
           <button class="primary-action" type="submit">Salva profilo</button>
@@ -909,6 +997,61 @@ function profileView() {
           <button class="primary-action" type="submit">Aggiorna password</button>
         </form>
       </div>
+    </section>
+  `
+}
+
+function staffManagementView() {
+  if (!isOwner()) {
+    return `
+      <section class="view page-view">
+        <div class="page-head"><div><h1>Impostazioni</h1></div></div>
+        <div class="placeholder-panel"><h2>Accesso riservato</h2><p>Solo l'amministratore può gestire lo staff.</p></div>
+      </section>
+    `
+  }
+
+  const rows = staffProfiles.map((profile) => {
+    const name = [profile.first_name, profile.last_name].filter(Boolean).join(' ')
+    return `
+      <form class="staff-member-card" data-staff-form data-user-id="${profile.id}">
+        <div class="staff-member-avatar">${(profile.first_name || profile.email || 'U').charAt(0).toUpperCase()}</div>
+        <div class="staff-member-fields">
+          <label class="form-field"><span>Nome</span><input name="first_name" value="${profile.first_name || ''}" required></label>
+          <label class="form-field"><span>Cognome</span><input name="last_name" value="${profile.last_name || ''}" required></label>
+          <label class="form-field staff-email-field"><span>Email</span><input value="${profile.email || ''}" disabled></label>
+          <label class="form-field"><span>Ruolo</span>
+            <select name="role">
+              ${[
+                ['owner','Amministratore'], ['coach','Allenatore'], ['assistant','Vice allenatore'],
+                ['athletic_coach','Preparatore fisico'], ['goalkeeper_coach','Preparatore portieri'],
+                ['analyst','Match analyst'], ['observer','Osservatore'], ['physio','Fisioterapista'],
+                ['collaborator','Collaboratore'], ['sporting_director','Direttore sportivo'],
+                ['read_only','Solo lettura'],
+              ].map(([value,label]) => `<option value="${value}" ${profile.role === value ? 'selected' : ''}>${label}</option>`).join('')}
+            </select>
+          </label>
+          <label class="staff-active-toggle"><input name="active" type="checkbox" ${profile.active !== false ? 'checked' : ''}><span>Account attivo</span></label>
+        </div>
+        <div class="staff-member-actions">
+          <span class="staff-member-name">${name || 'Nome da completare'}</span>
+          <p class="form-message" data-staff-message></p>
+          <button class="primary-action" type="submit">Salva</button>
+        </div>
+      </form>
+    `
+  }).join('')
+
+  return `
+    <section class="view page-view">
+      <div class="page-head">
+        <div><h1>Gestione Staff</h1><p><span>AMMINISTRAZIONE</span><b>•</b>Nomi, ruoli e accessi</p></div>
+      </div>
+      <div class="staff-management-note">
+        <strong>Nuovi account</strong>
+        <span>Per ora crea l'utente in Supabase Authentication. Comparirà qui automaticamente e potrai completare nome, cognome e ruolo.</span>
+      </div>
+      <div class="staff-list">${rows || '<div class="placeholder-panel"><p>Nessun profilo disponibile.</p></div>'}</div>
     </section>
   `
 }
@@ -1329,8 +1472,8 @@ function profileMenuHtml(userInitial, userEmail, userName, roleLabel) {
         aria-controls="profileDropdown"
         aria-label="Apri menu profilo"
       >
-        <span class="user-avatar">
-          ${userInitial}
+        <span class="user-avatar" aria-hidden="true">
+          <span class="avatar-initial">${userInitial}</span>
         </span>
 
         <span class="profile-menu-identity">
@@ -1353,8 +1496,8 @@ function profileMenuHtml(userInitial, userEmail, userName, roleLabel) {
         aria-hidden="true"
       >
         <div class="profile-dropdown-head">
-          <span class="profile-dropdown-avatar">
-            ${userInitial}
+          <span class="profile-dropdown-avatar" aria-hidden="true">
+            <span class="avatar-initial">${userInitial}</span>
           </span>
 
           <div>
@@ -1403,12 +1546,23 @@ export function renderApp(user) {
   const userEmail = user.email ?? ''
   const emailLocalPart = userEmail.split('@')[0] || 'Utente'
   const fallbackUserName = emailLocalPart
+    .replace(/\d+$/g, '')
     .replace(/[._-]+/g, ' ')
+    .trim()
     .replace(/\b\w/g, (letter) => letter.toUpperCase())
-  const userName = user.user_metadata?.full_name || user.user_metadata?.name || fallbackUserName
-  const roleLabel = 'Staff'
-  const userInitial =
-    userEmail.charAt(0).toUpperCase() || 'N'
+  const knownProfiles = {
+    'nicola.zecchi83@gmail.com': { name: 'Nicola Zecchi', role: 'Amministratore' },
+    'lorenzopalmieri@alice.it': { name: 'Lorenzo Palmieri', role: 'Vice allenatore' },
+    'lorenzo.palmieri@alice.it': { name: 'Lorenzo Palmieri', role: 'Vice allenatore' },
+    'maurizioaldrovandi@alice.it': { name: 'Maurizio Aldrovandi', role: 'Preparatore portieri' },
+    'maurizio.aldrovandi@alice.it': { name: 'Maurizio Aldrovandi', role: 'Preparatore portieri' },
+    'luca0276@hotmail.it': { name: 'Luca Platti', role: 'Preparatore fisico' },
+    'mari.flycom@gmail.com': { name: 'Matteo Mari', role: 'Direttore sportivo' },
+  }
+  const knownProfile = knownProfiles[userEmail.toLowerCase()]
+  const userName = knownProfile?.name || user.user_metadata?.full_name || user.user_metadata?.name || fallbackUserName || 'Utente'
+  const currentRoleLabel = knownProfile?.role || 'Staff'
+  const userInitial = userName.charAt(0).toUpperCase() || 'N'
 
   return `
     <div class="app-shell">
@@ -1443,7 +1597,7 @@ export function renderApp(user) {
             </div>
           </div>
 
-          ${profileMenuHtml(userInitial, userEmail, userName, roleLabel)}
+          ${profileMenuHtml(userInitial, userEmail, userName, currentRoleLabel)}
         </header>
 
         <main id="viewRoot">
@@ -1460,6 +1614,7 @@ export function renderApp(user) {
 export async function attachAppEvents(user) {
   currentUser = user
   await loadCurrentUserRole(user)
+  syncProfileHeader()
   await loadCalendarEvents()
   
   const root = document.querySelector('#viewRoot')
@@ -1496,6 +1651,10 @@ export async function attachAppEvents(user) {
     await loadCalendarEvents()
   }
 
+  if (key === 'settings') {
+    await loadStaffProfiles()
+  }
+
   const views = {
     dashboard: dashboardView,
     calendar: calendarView,
@@ -1503,6 +1662,7 @@ export async function attachAppEvents(user) {
     squad: squadView,
     analysis: analysisView,
     profile: profileView,
+    settings: staffManagementView,
   }
 
   root.innerHTML = views[key]
@@ -2098,18 +2258,74 @@ export async function attachAppEvents(user) {
     root.querySelector('[data-profile-form]')?.addEventListener('submit', async (event) => {
       event.preventDefault()
       const form = event.currentTarget
+      const formData = new FormData(form)
+      const firstName = formData.get('first_name')?.toString().trim() ?? ''
+      const lastName = formData.get('last_name')?.toString().trim() ?? ''
       const message = form.querySelector('[data-profile-message]')
-      const fullName = new FormData(form).get('full_name')?.toString().trim()
-      if (!fullName) return
-      const { data, error } = await supabase.auth.updateUser({ data: { full_name: fullName } })
-      if (error) { message.textContent = error.message; message.className = 'form-message is-error'; return }
+      if (!firstName || !lastName) return
+
+      const fullName = `${firstName} ${lastName}`.trim()
+      const { error: profileError } = await supabase.rpc('update_my_profile', {
+        p_first_name: firstName,
+        p_last_name: lastName,
+      })
+
+      if (profileError) {
+        message.textContent = profileError.message
+        message.className = 'form-message is-error'
+        return
+      }
+
+      const { data, error: authError } = await supabase.auth.updateUser({ data: { full_name: fullName } })
+      if (authError) {
+        message.textContent = authError.message
+        message.className = 'form-message is-error'
+        return
+      }
+
       currentUser = data.user
+      currentUserProfile = { ...currentUserProfile, first_name: firstName, last_name: lastName }
+      syncProfileHeader()
       message.textContent = 'Profilo aggiornato.'
       message.className = 'form-message is-success'
-      const topName = document.querySelector('.profile-menu-identity strong')
-      const dropName = document.querySelector('.profile-dropdown-head strong')
-      if (topName) topName.textContent = fullName
-      if (dropName) dropName.textContent = fullName
+    })
+
+    root.querySelectorAll('[data-staff-form]').forEach((form) => {
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault()
+        const userId = form.dataset.userId
+        const data = new FormData(form)
+        const message = form.querySelector('[data-staff-message]')
+        const payload = {
+          first_name: data.get('first_name')?.toString().trim() ?? '',
+          last_name: data.get('last_name')?.toString().trim() ?? '',
+          role: data.get('role')?.toString() ?? 'observer',
+          active: data.get('active') === 'on',
+          updated_at: new Date().toISOString(),
+        }
+
+        const { error } = await supabase.rpc('admin_update_staff_profile', {
+          p_user_id: userId,
+          p_first_name: payload.first_name,
+          p_last_name: payload.last_name,
+          p_role: payload.role,
+          p_active: payload.active,
+        })
+        if (error) {
+          message.textContent = error.message
+          message.className = 'form-message is-error'
+          return
+        }
+
+        message.textContent = 'Membro aggiornato.'
+        message.className = 'form-message is-success'
+
+        if (userId === currentUser.id) {
+          currentUserProfile = { ...currentUserProfile, ...payload }
+          currentUserRole = payload.role
+          syncProfileHeader()
+        }
+      })
     })
 
     root.querySelector('[data-password-form]')?.addEventListener('submit', async (event) => {
@@ -2173,13 +2389,36 @@ export async function attachAppEvents(user) {
 
   // Gestione robusta del menu profilo: funziona anche su touch/mobile
   // e non dipende dal punto esatto su cui viene premuto il pulsante.
-  const handleProfileMenuToggle = (event) => {
+  let profilePointerHandled = false
+
+  const handleProfileMenuPointerDown = (event) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) {
+      return
+    }
+
     event.preventDefault()
     event.stopPropagation()
+    profilePointerHandled = true
     toggleProfileMenu()
   }
 
-  profileMenuButton?.addEventListener('pointerup', handleProfileMenuToggle)
+  const handleProfileMenuClick = (event) => {
+    event.preventDefault()
+    event.stopPropagation()
+
+    if (profilePointerHandled) {
+      profilePointerHandled = false
+      return
+    }
+
+    toggleProfileMenu()
+  }
+
+  profileMenuButton?.addEventListener(
+    'pointerdown',
+    handleProfileMenuPointerDown,
+  )
+  profileMenuButton?.addEventListener('click', handleProfileMenuClick)
 
   profileDropdown?.addEventListener('click', (event) => {
     event.stopPropagation()

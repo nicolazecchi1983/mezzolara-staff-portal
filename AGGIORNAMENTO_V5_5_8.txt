@@ -1,0 +1,14 @@
+NZ V5.5.8 — PROFILI E GESTIONE STAFF
+
+- Nome e cognome non vengono più ricavati dall'indirizzo email.
+- Creato profilo staff con nome, cognome, email, ruolo e stato attivo.
+- Lorenzo viene mostrato come "Lorenzo Palmieri".
+- Maurizio viene mostrato come "Maurizio Aldrovandi".
+- Nicola viene mostrato come "Nicola Zecchi".
+- Il profilo personale permette di modificare separatamente nome e cognome.
+- Impostazioni diventa Gestione Staff per l'amministratore.
+- L'amministratore può modificare nome, cognome, ruolo e stato degli utenti esistenti.
+- I nuovi utenti vengono ancora creati da Supabase Authentication; il profilo compare automaticamente nel portale.
+
+PRIMA DI AVVIARE IL PORTALE:
+Eseguire SUPABASE_PROFILI_STAFF.sql nel SQL Editor di Supabase.

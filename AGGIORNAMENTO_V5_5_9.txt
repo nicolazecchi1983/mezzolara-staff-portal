@@ -1,0 +1,13 @@
+NZ V5.5.9 — RUOLI STAFF REALI
+
+- Nicola Zecchi: Amministratore
+- Lorenzo Palmieri: Vice allenatore
+- Maurizio Aldrovandi: Preparatore portieri
+- Luca Platti: Preparatore fisico
+- Matteo Mari: Direttore sportivo
+- Aggiunto il ruolo Direttore sportivo alla Gestione Staff.
+- Corretto il testo Preparatore atletico in Preparatore fisico.
+- Nome e ruolo corretti vengono mostrati subito nell'header per gli account conosciuti.
+- Il database profiles resta la fonte definitiva dopo il caricamento.
+
+Eseguire SUPABASE_PROFILI_STAFF.sql nel SQL Editor prima del test.

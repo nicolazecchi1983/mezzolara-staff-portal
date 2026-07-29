@@ -1,0 +1,5 @@
+AGGIORNAMENTO V5.5.3
+
+- Allineata l'altezza dei due pannelli inferiori della Dashboard.
+- Il pulsante "Apri allenamento" rimane ancorato al fondo del pannello.
+- Nessuna modifica a Supabase richiesta.
