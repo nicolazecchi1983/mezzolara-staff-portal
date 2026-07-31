@@ -1013,7 +1013,7 @@ function trainingSheetEditorView() {
               <label class="ts-field"><span>Data</span><div class="ts-input-icon"><i>${icon('calendar')}</i><input name="date" type="date" required></div></label>
               <label class="ts-field"><span>Orario</span><div class="ts-input-icon"><i>${icon('clock')}</i><input name="time" type="time" value="17:30" required></div></label>
               <label class="ts-field"><span>Campo</span><select name="location"><option>Mezzolara</option><option>Budrio</option><option>Altro</option></select></label>
-              <label class="ts-field"><span>Allenamento n°</span><input name="progressive" type="number" min="1" value="1" readonly aria-readonly="true"></label>
+              <label class="ts-field"><span>Allenamento n°</span><input name="progressive" type="number" min="1" value="1"><small class="ts-field-help">Proposto automaticamente, modificabile</small></label>
               <label class="ts-field"><span>Presenti</span><input name="present" type="number" min="0" value="28" readonly aria-readonly="true"><small class="ts-field-help">Calcolati automaticamente dalla Rosa</small></label>
             </div>
 
@@ -1065,7 +1065,7 @@ function trainingSheetEditorView() {
         <aside class="ts-live-column">
           <div class="ts-preview-toolbar"><div><span>ANTEPRIMA LIVE</span><strong>Training Sheet</strong></div><button type="button" data-print-sheet>${icon('sheet')}<span>Crea PDF</span></button></div>
           <div class="ts-paper-frame"><article class="ts-paper" data-ts-preview></article></div>
-          <p class="ts-publish-note" data-publish-note>Usa “Crea PDF” e scegli “Salva come PDF” nella finestra di stampa.</p>
+          <p class="ts-publish-note" data-publish-note>Il PDF verrà salvato, archiviato e collegato al giorno del Calendario.</p>
         </aside>
       </div>
     </section>
@@ -1299,7 +1299,7 @@ function trainingSheetPreviewHtml(event) {
     return `
       <iframe
         class="training-sheet-preview training-sheet-preview--pdf"
-        src="${event.trainingSheetUrl}"
+        src="${event.trainingSheetUrl}#toolbar=0&navpanes=0&scrollbar=1"
         title="Anteprima Training Sheet"
       ></iframe>
     `
@@ -1380,7 +1380,7 @@ function drawerHtml(event) {
                 ${trainingSheetPreviewHtml(event)}
               </div>
 
-              ${event.trainingSheetUrl
+              ${event.trainingSheetUrl && isOwner()
                 ? `
                     <a
                       class="wide-button drawer-sheet-link"
@@ -2532,7 +2532,7 @@ export async function attachAppEvents(user) {
         const formattedDate = d.date ? new Date(`${d.date}T12:00:00`).toLocaleDateString('it-IT') : '—'
         const total = d.phases.reduce((sum,p)=>sum+(Number(p.duration)||0),0)
         preview.innerHTML = `
-          <header class="ts-paper-head"><div class="ts-paper-brand"><b>NZ</b><span>NICOLA ZECCHI</span></div><div class="ts-paper-title"><small>TRAINING SHEET</small><strong>ALL_${String(d.progressive || '---').padStart(3,'0')}</strong></div></header>
+          <header class="ts-paper-head"><div class="ts-paper-brand"><img src="/mezzolara-logo.png" alt="Mezzolara Calcio"><div><strong>MEZZOLARA CALCIO</strong><span>TRAINING SHEET</span></div></div><div class="ts-paper-title"><small>ALLENATORE · NICOLA ZECCHI</small><strong>ALL_${String(d.progressive || '---').padStart(3,'0')}</strong></div></header>
           <div class="ts-paper-meta"><span><small>Data</small><b>${escape(formattedDate)}</b></span><span><small>Ora</small><b>${escape(d.time || '—')}</b></span><span><small>Campo</small><b>${escape(d.location || '—')}</b></span><span><small>Presenti</small><b>${escape(d.present || '—')}</b></span><span class="ts-paper-md ts-md-${escape((d.match_day || 'none').replace('+','plus').replace('-','minus').toLowerCase())}">${escape(d.match_day || 'MD —')}</span></div>
           <div class="ts-paper-load"><span><small>Focus fisico</small><b>${escape(d.focus || '—')}</b></span><span><small>Intensità</small>${bar(d.intensity)}</span><span><small>Volume</small>${bar(d.volume)}</span><span><small>Durata</small><b>${total || '—'}'</b></span></div>
           <section class="ts-paper-pillars">${['Creare il vantaggio','Conservare il vantaggio','Sfruttare il vantaggio','Difendere il vantaggio'].map((p,i)=>`<span class="pillar-${i+1} ${d.pillars.includes(p)?'is-selected':'is-muted'}">${escape(p)}</span>`).join('')}</section>
@@ -2607,12 +2607,90 @@ export async function attachAppEvents(user) {
         const storedNext = Number(localStorage.getItem('nz-training-sheet-next-progressive') || 0)
         return Math.max(1, storedNext, ...fromPaths.map((value) => value + 1))
       }
-      const printSheet=()=>{
-        const current = Number(form.elements.progressive?.value || 1)
-        localStorage.setItem('nz-training-sheet-next-progressive', String(current + 1))
-        window.print()
+      const createAndPublishPdf = async () => {
+        const button = manualEditor.querySelector('[data-print-sheet]')
+        const note = manualEditor.querySelector('[data-publish-note]')
+        const d = collect()
+        if (!d.date || !d.time || !d.location) {
+          if (note) note.textContent = 'Completa data, orario e campo prima di creare il PDF.'
+          return
+        }
+        if (!window.html2canvas || !window.jspdf?.jsPDF) {
+          if (note) note.textContent = 'Generatore PDF non disponibile. Controlla la connessione e ricarica la pagina.'
+          return
+        }
+        button.disabled = true
+        button.classList.add('is-loading')
+        const originalLabel = button.querySelector('span')?.textContent || 'Crea PDF'
+        if (button.querySelector('span')) button.querySelector('span').textContent = 'Creazione…'
+        if (note) note.textContent = 'Creazione e pubblicazione della Training Sheet…'
+        try {
+          const canvas = await window.html2canvas(preview, {
+            scale: 2,
+            useCORS: true,
+            backgroundColor: '#ffffff',
+            logging: false,
+            width: preview.scrollWidth,
+            height: preview.scrollHeight,
+          })
+          const { jsPDF } = window.jspdf
+          const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true })
+          const pageWidth = 210
+          const pageHeight = 297
+          const margin = 5
+          const imageWidth = pageWidth - margin * 2
+          const imageHeight = canvas.height * imageWidth / canvas.width
+          const scale = Math.min(1, (pageHeight - margin * 2) / imageHeight)
+          const finalWidth = imageWidth * scale
+          const finalHeight = imageHeight * scale
+          pdf.addImage(canvas.toDataURL('image/jpeg', .96), 'JPEG', (pageWidth-finalWidth)/2, margin, finalWidth, finalHeight, undefined, 'FAST')
+          const blob = pdf.output('blob')
+          const progressive = String(Number(d.progressive || 1)).padStart(3, '0')
+          const safeDate = d.date.replaceAll('-', '')
+          const fileName = `ALL_${progressive}_${safeDate}.pdf`
+          const filePath = `${d.date}/${fileName}`
+
+          const existingEvent = calendarEvents.find((event) => {
+            if (!isTrainingEventType(event.type)) return false
+            const localDate = new Date(event.startAt).toLocaleDateString('sv-SE')
+            return localDate === d.date
+          })
+
+          const upload = await supabase.storage.from('training-sheets').upload(filePath, blob, {
+            contentType: 'application/pdf', cacheControl: '3600', upsert: true,
+          })
+          if (upload.error) throw upload.error
+
+          const eventPayload = {
+            title: 'Allenamento', event_type: 'training',
+            start_at: new Date(`${d.date}T${d.time}:00`).toISOString(),
+            location: d.location || null, match_day: d.match_day || null,
+            present_count: Number(d.present) || 0, squad_total: squadTotal,
+            training_sheet_path: filePath,
+          }
+          const result = existingEvent
+            ? await supabase.from('events').update(eventPayload).eq('id', existingEvent.id)
+            : await supabase.from('events').insert(eventPayload)
+          if (result.error) {
+            await supabase.storage.from('training-sheets').remove([filePath])
+            throw result.error
+          }
+
+          pdf.save(fileName)
+          localStorage.setItem('nz-training-sheet-next-progressive', String(Number(d.progressive || 1) + 1))
+          await loadCalendarEvents()
+          if (note) note.textContent = 'PDF creato e Training Sheet collegata al Calendario.'
+          if (draftState) draftState.textContent = 'Pubblicata'
+        } catch (error) {
+          console.error('Errore pubblicazione Training Sheet:', error)
+          if (note) note.textContent = `Errore: ${error?.message || 'pubblicazione non riuscita'}`
+        } finally {
+          button.disabled = false
+          button.classList.remove('is-loading')
+          if (button.querySelector('span')) button.querySelector('span').textContent = originalLabel
+        }
       }
-      manualEditor.querySelector('[data-print-sheet]')?.addEventListener('click',printSheet)
+      manualEditor.querySelector('[data-print-sheet]')?.addEventListener('click', createAndPublishPdf)
       restore()
       const nextProgressive = determineNextProgressive()
       if (form.elements.progressive && Number(form.elements.progressive.value || 0) < nextProgressive) {

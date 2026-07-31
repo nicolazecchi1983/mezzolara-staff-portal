@@ -3705,3 +3705,229 @@ details[open] > summary > .library-chevron {
   [data-ts-preview] header { break-inside: avoid; page-break-inside: avoid; }
   @page { size: A4 portrait; margin: 0; }
 }
+
+/* V6.2.3 — PUBBLICAZIONE CALENDARIO E RESTYLING TRAINING SHEET */
+:root {
+  --ts-navy: #06143f;
+  --ts-blue: #083eb7;
+  --ts-action: #58cff5;
+  --ts-line: #b9c8e8;
+  --ts-soft: #f4f7fc;
+}
+
+/* Un solo colore operativo per Match Day, Pilastri, Intensità e Volume */
+.ts-md-selector button.is-active,
+.ts-md-selector button[data-md].is-active,
+.ts-rating button.is-active {
+  color: #061522 !important;
+  border-color: #83def8 !important;
+  background: var(--ts-action) !important;
+  box-shadow: 0 7px 18px rgba(88, 207, 245, .2) !important;
+}
+.ts-pillar input:checked + span,
+.ts-pillar--create input:checked + span,
+.ts-pillar--keep input:checked + span,
+.ts-pillar--exploit input:checked + span,
+.ts-pillar--defend input:checked + span {
+  color: #061522 !important;
+  border-color: #83def8 !important;
+  background: var(--ts-action) !important;
+}
+
+/* Il progressivo è proposto automaticamente ma resta modificabile */
+.ts-field input[name="progressive"] {
+  color: #fff;
+  background: #071522;
+  cursor: text;
+}
+
+/* Foglio: impostazione più vicina alla Training Sheet storica */
+.ts-paper-frame {
+  background: #18212b;
+}
+.ts-paper {
+  width: 100%;
+  min-height: 0;
+  padding: 18px 20px 20px;
+  border: 1px solid #d7deec;
+  color: #10172a;
+  background: #fff;
+  box-shadow: 0 22px 54px rgba(0,0,0,.34);
+  font-family: Arial, Helvetica, sans-serif;
+}
+.ts-paper-head {
+  min-height: 70px;
+  padding: 0 0 12px;
+  border-bottom: 4px solid var(--ts-navy);
+}
+.ts-paper-brand {
+  gap: 12px;
+}
+.ts-paper-brand img {
+  width: 58px;
+  height: 58px;
+  object-fit: contain;
+}
+.ts-paper-brand > div {
+  display: grid;
+  gap: 2px;
+}
+.ts-paper-brand strong {
+  color: var(--ts-navy);
+  font-size: 1.18rem;
+  font-weight: 900;
+  letter-spacing: .025em;
+}
+.ts-paper-brand span {
+  color: var(--ts-blue);
+  font-size: .8rem;
+  font-weight: 900;
+  letter-spacing: .08em;
+}
+.ts-paper-title small {
+  color: #667086;
+  font-size: .58rem;
+  font-weight: 800;
+}
+.ts-paper-title strong {
+  color: var(--ts-navy);
+  font-size: 1.22rem;
+  font-weight: 900;
+}
+
+.ts-paper-meta,
+.ts-paper-load {
+  gap: 0;
+  margin-top: 10px;
+  border: 1px solid var(--ts-line);
+  background: transparent;
+}
+.ts-paper-meta > span,
+.ts-paper-load > span {
+  min-height: 52px;
+  padding: 8px 10px;
+  border-right: 1px solid var(--ts-line);
+  background: var(--ts-soft);
+}
+.ts-paper-meta > span:last-child,
+.ts-paper-load > span:last-child { border-right: 0; }
+.ts-paper-meta small,
+.ts-paper-load small,
+.ts-paper-objectives small,
+.ts-paper-roster small {
+  color: var(--ts-blue);
+  font-weight: 900;
+}
+.ts-paper-meta b,
+.ts-paper-load b { color: #111a30; }
+.ts-paper-meta .ts-paper-md,
+.ts-paper-md[class*="ts-md-"] {
+  color: #fff !important;
+  background: var(--ts-navy) !important;
+}
+.ts-mini-scale i.on {
+  background: var(--ts-action) !important;
+}
+
+.ts-paper-pillars {
+  gap: 0;
+  margin: 10px 0;
+  border: 1px solid var(--ts-line);
+  background: #fff;
+}
+.ts-paper-pillars span,
+.ts-paper-pillars .pillar-1,
+.ts-paper-pillars .pillar-2,
+.ts-paper-pillars .pillar-3,
+.ts-paper-pillars .pillar-4 {
+  min-height: 34px;
+  border: 0 !important;
+  border-right: 1px solid var(--ts-line) !important;
+  border-radius: 0;
+  color: #778097 !important;
+  background: #f5f6f9 !important;
+  opacity: 1 !important;
+}
+.ts-paper-pillars span:last-child { border-right: 0 !important; }
+.ts-paper-pillars span.is-selected,
+.ts-paper-pillars .pillar-1.is-selected,
+.ts-paper-pillars .pillar-2.is-selected,
+.ts-paper-pillars .pillar-3.is-selected,
+.ts-paper-pillars .pillar-4.is-selected {
+  color: #fff !important;
+  background: var(--ts-navy) !important;
+}
+
+.ts-paper-roster > div,
+.ts-paper-objectives > div {
+  border-color: var(--ts-line);
+  border-radius: 4px;
+  background: #fff;
+}
+.ts-paper-roster .inj span {
+  color: #18223a;
+  font-weight: 700;
+}
+.ts-paper-objectives > div {
+  border-top: 4px solid var(--ts-navy);
+}
+
+.ts-paper-phases {
+  gap: 0;
+  border: 1px solid var(--ts-line);
+}
+.ts-paper-phases article {
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--ts-line);
+  border-radius: 0;
+  background: #fff;
+}
+.ts-paper-phases article:last-child { border-bottom: 0; }
+.ts-paper-phases article > div {
+  min-height: 42px;
+  grid-template-columns: 34px minmax(0,1fr) auto auto;
+  gap: 8px;
+  padding: 6px 8px;
+  color: var(--ts-navy);
+  background: #f5f7fc;
+  border-bottom: 1px solid #dbe3f2;
+}
+.ts-paper-phases article > div > b {
+  height: 30px;
+  border-radius: 3px;
+  color: #fff;
+  background: var(--ts-navy);
+}
+.ts-paper-phases article strong {
+  color: var(--ts-blue);
+  font-size: .78rem;
+  text-transform: uppercase;
+}
+.ts-paper-phases .ts-phase-gk {
+  color: var(--ts-navy);
+  border-color: var(--ts-blue);
+  background: #fff;
+}
+.ts-paper-phases article > p,
+.ts-paper-phases article > small {
+  margin-left: 42px;
+  margin-right: 10px;
+}
+.ts-paper-phases article > p { margin-top: 9px; margin-bottom: 8px; }
+.ts-paper-phases article > small:last-child { margin-bottom: 9px; }
+
+.ts-preview-toolbar button.is-loading { opacity: .72; cursor: wait; }
+.ts-preview-toolbar button:disabled { pointer-events: none; }
+
+@media print {
+  .ts-paper-meta .ts-paper-md,
+  .ts-paper-md[class*="ts-md-"],
+  .ts-paper-pillars span.is-selected,
+  .ts-paper-pillars .pillar-1.is-selected,
+  .ts-paper-pillars .pillar-2.is-selected,
+  .ts-paper-pillars .pillar-3.is-selected,
+  .ts-paper-pillars .pillar-4.is-selected {
+    background: var(--ts-navy) !important;
+  }
+}

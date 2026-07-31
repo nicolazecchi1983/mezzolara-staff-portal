@@ -1,0 +1,10 @@
+V6.2.3 — PUBBLICAZIONE CALENDARIO E RESTYLING TRAINING SHEET
+
+- Inserito logo Mezzolara nella Training Sheet.
+- Uniformato il linguaggio colore: blu scuro nel documento e azzurro operativo nelle selezioni.
+- Eliminati colori differenti da Match Day e Pilastri.
+- Progressivo proposto automaticamente ma modificabile.
+- Crea PDF ora genera un PDF reale, lo scarica, lo carica nel bucket training-sheets e lo collega all'allenamento della stessa data; se l'evento non esiste lo crea.
+- Aggiornati presenti, campo, orario e Match Day dell'evento collegato.
+- PDF visualizzabile dal Calendario; link di apertura riservato all'amministratore.
+- Grafica Training Sheet resa più strutturata e vicina al modello storico.
