@@ -1,5 +1,6 @@
 import { icon } from './icons.js'
 import { supabase } from '../supabase.js'
+import { parseTrainingSheetNarration } from '../services/trainingSheetParser.js'
 
 import {
   players,
@@ -186,6 +187,7 @@ async function loadCalendarEvents() {
 const menu = [
   ['dashboard', 'Dashboard'],
   ['calendar', 'Calendario'],
+  ['training-sheet', 'Training Sheet'],
   ['library', 'Training Library'],
   ['squad', 'Rosa'],
   ['analysis', 'Analisi Gare'],
@@ -951,6 +953,97 @@ function trainingLibraryView() {
         Nessuna Training Sheet corrisponde alla ricerca.
       </div>
     </section>
+  `
+}
+
+function tsEscapeHtml(value = '') {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+}
+
+function trainingSheetEditorView() {
+  return `
+    <section class="view page-view ts-editor-view">
+      <div class="page-head ts-editor-head">
+        <div>
+          <h1>Training Sheet</h1>
+          <p><span>EDITOR</span><b>•</b>Dettatura, controllo e salvataggio automatico</p>
+        </div>
+      </div>
+
+      <div class="ts-editor-grid">
+        <article class="ts-editor-panel">
+          <div class="ts-panel-heading">
+            <div><span class="ts-step">1</span><h2>Dettatura</h2></div>
+            <span class="ts-badge">V6.1.3</span>
+          </div>
+          <p class="ts-panel-copy">Incolla qui la trascrizione dell'allenamento. Nella prossima release questo testo arriverà direttamente dal vocale.</p>
+          <textarea class="ts-narration" data-ts-narration placeholder="Esempio: Oggi 30 luglio siamo a Mezzolara e ci alleniamo alle 17:30..."></textarea>
+          <div class="ts-action-row">
+            <button class="primary-action" type="button" data-ts-analyze>Analizza seduta</button>
+            <button class="secondary-action" type="button" data-ts-clear>Pulisci</button>
+          </div>
+          <p class="form-message" data-ts-message></p>
+        </article>
+
+        <article class="ts-editor-panel ts-result-panel">
+          <div class="ts-panel-heading">
+            <div><span class="ts-step">2</span><h2>Dati strutturati</h2></div>
+            <span class="ts-status is-empty" data-ts-status>In attesa</span>
+          </div>
+          <div class="ts-empty-result" data-ts-empty>Analizza la dettatura per visualizzare i campi compilati automaticamente.</div>
+          <form class="ts-result-form" data-ts-form hidden></form>
+        </article>
+      </div>
+    </section>
+  `
+}
+
+function trainingSheetResultHtml(result) {
+  const data = result.data
+  const absenceRows = [
+    ...data.absences.injured.map(name => `<span class="ts-person-chip is-injured">${tsEscapeHtml(name)}</span>`),
+    ...data.absences.absent.map(name => `<span class="ts-person-chip">${tsEscapeHtml(name)}</span>`),
+  ].join('') || '<span class="ts-muted">Nessun assente riconosciuto</span>'
+
+  const phases = data.phases.map((phase, index) => `
+    <article class="ts-phase-card">
+      <div class="ts-phase-title"><span>${index + 1}</span><input name="phase_${index}_title" value="${tsEscapeHtml(phase.title)}"></div>
+      <div class="ts-phase-fields">
+        <label><span>Durata</span><input name="phase_${index}_duration" type="number" min="1" value="${phase.duration_minutes ?? ''}"></label>
+        <label><span>Portieri</span><select name="phase_${index}_goalkeepers"><option value="false" ${phase.goalkeepers ? '' : 'selected'}>No</option><option value="true" ${phase.goalkeepers ? 'selected' : ''}>Sì</option></select></label>
+      </div>
+      <label><span>Descrizione</span><textarea name="phase_${index}_description">${tsEscapeHtml(phase.description)}</textarea></label>
+      <label><span>Contenitori</span><input name="phase_${index}_containers" value="${tsEscapeHtml(phase.containers.join(' · '))}"></label>
+      ${phase.exercises?.length ? `<div class="ts-exercise-list">${phase.exercises.map(ex => `<div><strong>${tsEscapeHtml(ex.title)}</strong><span>${ex.duration_minutes ?? '—'}'</span></div>`).join('')}</div>` : ''}
+    </article>
+  `).join('')
+
+  const missing = result.missing_fields.length
+    ? `<div class="ts-checks is-warning"><strong>Da completare</strong>${result.missing_fields.map(item => `<span>• ${tsEscapeHtml(item)}</span>`).join('')}</div>`
+    : '<div class="ts-checks is-ready"><strong>Seduta completa</strong><span>Tutti i controlli obbligatori sono superati.</span></div>'
+
+  return `
+    <div class="ts-summary-grid">
+      <label><span>Data</span><input name="date" type="date" value="${data.date ?? ''}"></label>
+      <label><span>Orario</span><input name="time" type="time" value="${data.time ?? ''}"></label>
+      <label><span>Campo</span><input name="location" value="${tsEscapeHtml(data.location ?? '')}"></label>
+      <label><span>Focus fisico</span><input name="focus_physical" value="${tsEscapeHtml(data.focus_physical ?? '')}"></label>
+      <label><span>Intensità</span><input name="intensity" type="number" min="1" max="5" value="${data.intensity ?? ''}"></label>
+      <label><span>Volume</span><input name="volume" type="number" min="1" max="5" value="${data.volume ?? ''}"></label>
+    </div>
+    <div class="ts-section-block"><h3>Assenti riconosciuti</h3><div class="ts-person-list">${absenceRows}</div></div>
+    <div class="ts-section-block"><div class="ts-section-title"><h3>Fasi</h3><strong>${data.total_duration_minutes ?? '—'} minuti</strong></div><div class="ts-phases">${phases}</div></div>
+    <div class="ts-section-block ts-bottom-fields">
+      <label><span>Obiettivo della seduta</span><textarea name="objective">${tsEscapeHtml(data.objective ?? '')}</textarea></label>
+      <label><span>Principi di gioco</span><input name="principles" value="${tsEscapeHtml(data.principles.join(' · '))}"></label>
+    </div>
+    ${missing}
+    <div class="ts-autosave-row" aria-live="polite"><span class="ts-autosave-dot"></span><span data-ts-save-message>Bozza non ancora sincronizzata.</span></div>
   `
 }
 
@@ -1763,6 +1856,7 @@ export async function attachAppEvents(user) {
   const views = {
     dashboard: dashboardView,
     calendar: calendarView,
+    'training-sheet': trainingSheetEditorView,
     library: trainingLibraryView,
     squad: squadView,
     analysis: analysisView,
@@ -1775,7 +1869,7 @@ export async function attachAppEvents(user) {
     ? views[key]()
     : placeholderView(label)
 
-  bindDynamic()
+  await bindDynamic()
 
   document.documentElement.scrollTop = 0
   document.body.scrollTop = 0
@@ -2303,7 +2397,7 @@ export async function attachAppEvents(user) {
     openProfileMenu()
   }
 
-  function bindDynamic() {
+  async function bindDynamic() {
     root
       .querySelectorAll('[data-open-event]')
       .forEach((button) => {
@@ -2519,6 +2613,205 @@ export async function attachAppEvents(user) {
     })
 
 
+    const tsNarration = root.querySelector('[data-ts-narration]')
+    const tsForm = root.querySelector('[data-ts-form]')
+    const tsEmpty = root.querySelector('[data-ts-empty]')
+    const tsStatus = root.querySelector('[data-ts-status]')
+    const tsMessage = root.querySelector('[data-ts-message]')
+    let tsDraftId = null
+    let tsAutosaveTimer = null
+    let tsSaving = false
+    let tsSaveQueued = false
+
+    const setTsSaveState = (state, text) => {
+      const saveMessage = tsForm?.querySelector('[data-ts-save-message]')
+      const saveRow = tsForm?.querySelector('.ts-autosave-row')
+      if (!saveMessage || !saveRow) return
+      saveMessage.textContent = text
+      saveRow.className = `ts-autosave-row is-${state}`
+    }
+
+    const buildTsPayload = () => {
+      if (!tsForm?.dataset.parserResult) return null
+      const formData = new FormData(tsForm)
+      const original = JSON.parse(tsForm.dataset.parserResult)
+      const payloadData = {
+        ...original.data,
+        date: formData.get('date') || null,
+        time: formData.get('time') || null,
+        location: String(formData.get('location') || '').trim() || null,
+        focus_physical: String(formData.get('focus_physical') || '').trim() || null,
+        intensity: Number(formData.get('intensity')) || null,
+        volume: Number(formData.get('volume')) || null,
+        objective: String(formData.get('objective') || '').trim(),
+        principles: String(formData.get('principles') || '').split('·').map(v => v.trim()).filter(Boolean),
+        phases: original.data.phases.map((phase, index) => ({
+          ...phase,
+          title: String(formData.get(`phase_${index}_title`) || '').trim(),
+          duration_minutes: Number(formData.get(`phase_${index}_duration`)) || null,
+          goalkeepers: formData.get(`phase_${index}_goalkeepers`) === 'true',
+          description: String(formData.get(`phase_${index}_description`) || '').trim(),
+          containers: String(formData.get(`phase_${index}_containers`) || '').split('·').map(v => v.trim()).filter(Boolean),
+        })),
+      }
+      payloadData.total_duration_minutes = payloadData.phases.reduce((sum, item) => sum + (Number(item.duration_minutes) || 0), 0)
+      return payloadData
+    }
+
+    const saveTsDraft = async () => {
+      if (!tsForm || tsForm.hidden || !currentUser || !tsNarration?.value.trim()) return
+      if (tsSaving) {
+        tsSaveQueued = true
+        return
+      }
+
+      const payloadData = buildTsPayload()
+      if (!payloadData) return
+
+      tsSaving = true
+      setTsSaveState('saving', 'Salvataggio automatico in corso…')
+
+      const row = {
+        user_id: currentUser.id,
+        source_text: tsNarration.value.trim(),
+        status: 'draft',
+        session_date: payloadData.date,
+        session_time: payloadData.time,
+        location: payloadData.location,
+        parsed_data: payloadData,
+        updated_at: new Date().toISOString(),
+      }
+
+      let response
+      if (tsDraftId) {
+        response = await supabase
+          .from('training_sheet_drafts')
+          .update(row)
+          .eq('id', tsDraftId)
+          .eq('user_id', currentUser.id)
+          .select('id')
+          .single()
+      } else {
+        response = await supabase
+          .from('training_sheet_drafts')
+          .insert(row)
+          .select('id')
+          .single()
+      }
+
+      tsSaving = false
+      if (response.error) {
+        setTsSaveState('error', `Salvataggio non riuscito: ${response.error.message}`)
+      } else {
+        tsDraftId = response.data?.id || tsDraftId
+        setTsSaveState('saved', 'Bozza salvata automaticamente.')
+      }
+
+      if (tsSaveQueued) {
+        tsSaveQueued = false
+        await saveTsDraft()
+      }
+    }
+
+    const scheduleTsAutosave = () => {
+      window.clearTimeout(tsAutosaveTimer)
+      setTsSaveState('pending', 'Modifiche da sincronizzare…')
+      tsAutosaveTimer = window.setTimeout(saveTsDraft, 700)
+    }
+
+    const attachTsFieldAutosave = () => {
+      tsForm?.querySelectorAll('input, textarea, select').forEach((field) => {
+        field.addEventListener('input', scheduleTsAutosave)
+        field.addEventListener('change', scheduleTsAutosave)
+      })
+    }
+
+    const restoreLatestTsDraft = async () => {
+      if (!currentUser?.id || !tsNarration || !tsForm || !tsEmpty || !tsStatus) return
+
+      const { data, error } = await supabase
+        .from('training_sheet_drafts')
+        .select('id, source_text, parsed_data, status, updated_at')
+        .eq('user_id', currentUser.id)
+        .eq('status', 'draft')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (error) {
+        console.warn('Impossibile ripristinare la bozza Training Sheet:', error.message)
+        return
+      }
+
+      if (!data?.parsed_data) return
+
+      const parsed = data.parsed_data
+      const missingFields = []
+      if (!parsed.date) missingFields.push('Data')
+      if (!parsed.time) missingFields.push('Orario')
+      if (!parsed.location) missingFields.push('Campo')
+      if (!Array.isArray(parsed.phases) || parsed.phases.length === 0) missingFields.push('Fasi')
+      if (!parsed.focus_physical) missingFields.push('Focus fisico')
+      if (!parsed.intensity) missingFields.push('Intensità')
+      if (!parsed.volume) missingFields.push('Volume')
+
+      const result = {
+        data: parsed,
+        missing_fields: missingFields,
+        status: missingFields.length ? 'da_completare' : 'pronta',
+      }
+
+      tsDraftId = data.id
+      tsNarration.value = data.source_text || ''
+      tsEmpty.hidden = true
+      tsForm.hidden = false
+      tsForm.innerHTML = trainingSheetResultHtml(result)
+      tsForm.dataset.parserResult = JSON.stringify(result)
+      tsStatus.textContent = missingFields.length ? 'Da completare' : 'Pronta'
+      tsStatus.className = `ts-status ${missingFields.length ? 'is-warning' : 'is-ready'}`
+      attachTsFieldAutosave()
+      setTsSaveState('saved', 'Bozza ripristinata e salvata automaticamente.')
+      if (tsMessage) {
+        tsMessage.textContent = 'Ultima bozza ripristinata.'
+        tsMessage.className = 'form-message is-success'
+      }
+    }
+
+    root.querySelector('[data-ts-clear]')?.addEventListener('click', () => {
+      window.clearTimeout(tsAutosaveTimer)
+      tsDraftId = null
+      if (tsNarration) tsNarration.value = ''
+      if (tsForm) { tsForm.hidden = true; tsForm.innerHTML = ''; delete tsForm.dataset.parserResult }
+      if (tsEmpty) tsEmpty.hidden = false
+      if (tsStatus) { tsStatus.textContent = 'In attesa'; tsStatus.className = 'ts-status is-empty' }
+      if (tsMessage) { tsMessage.textContent = ''; tsMessage.className = 'form-message' }
+    })
+
+    root.querySelector('[data-ts-analyze]')?.addEventListener('click', async () => {
+      const text = tsNarration?.value.trim() || ''
+      if (!text) {
+        tsMessage.textContent = 'Inserisci la dettatura prima di analizzare.'
+        tsMessage.className = 'form-message is-error'
+        return
+      }
+
+      const result = parseTrainingSheetNarration(text)
+      tsMessage.textContent = 'Seduta analizzata. La bozza viene salvata automaticamente.'
+      tsMessage.className = 'form-message is-success'
+      tsEmpty.hidden = true
+      tsForm.hidden = false
+      tsForm.innerHTML = trainingSheetResultHtml(result)
+      tsForm.dataset.parserResult = JSON.stringify(result)
+      tsStatus.textContent = result.status === 'pronta' ? 'Pronta' : 'Da completare'
+      tsStatus.className = `ts-status ${result.status === 'pronta' ? 'is-ready' : 'is-warning'}`
+
+      attachTsFieldAutosave()
+
+      await saveTsDraft()
+    })
+
+    await restoreLatestTsDraft()
+
     root.querySelector('[data-library-search]')?.addEventListener('input', (event) => {
       const query = event.currentTarget.value.trim().toLocaleLowerCase('it-IT')
       const libraryRoot = root.querySelector('[data-library-root]')
@@ -2636,5 +2929,5 @@ export async function attachAppEvents(user) {
     }
   })
 
-  bindDynamic()
+  await bindDynamic()
 }
