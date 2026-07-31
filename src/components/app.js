@@ -1,6 +1,5 @@
 import { icon } from './icons.js'
 import { supabase } from '../supabase.js'
-import { parseTrainingSheetNarration } from '../services/trainingSheetParser.js'
 
 import {
   players,
@@ -17,7 +16,7 @@ let currentCalendarDate = new Date()
 currentCalendarDate.setDate(1)
 
 function isOwner() {
-  return currentUserRole === 'owner'
+  return ['owner', 'admin', 'administrator'].includes(currentUserRole)
 }
 
 function roleLabel(role) {
@@ -187,7 +186,7 @@ async function loadCalendarEvents() {
 const menu = [
   ['dashboard', 'Dashboard'],
   ['calendar', 'Calendario'],
-  ['training-sheet', 'Training Sheet'],
+  ['training-sheet', 'Training Sheet Editor'],
   ['library', 'Training Library'],
   ['squad', 'Rosa'],
   ['analysis', 'Analisi Gare'],
@@ -966,38 +965,108 @@ function tsEscapeHtml(value = '') {
 }
 
 function trainingSheetEditorView() {
+  if (!isOwner()) {
+    return `
+      <section class="view page-view">
+        <div class="page-head"><div><h1>Training Sheet Editor</h1><p><span>ACCESSO RISERVATO</span><b>•</b>Solo amministratore</p></div></div>
+        <div class="placeholder-panel"><h2>Editor non disponibile</h2><p>Puoi consultare le Training Sheet pubblicate direttamente dal Calendario.</p></div>
+      </section>
+    `
+  }
+
+  const rosterPlayers = players
+    .map((player) => {
+      const parts = player.name.trim().split(/\s+/)
+      const surname = parts.pop() || ''
+      const firstName = parts.join(' ')
+      return {
+        ...player,
+        canonicalName: player.name,
+        displayName: `${surname.toUpperCase()} ${firstName}`.trim(),
+        surname,
+      }
+    })
+    .sort((a, b) => a.surname.localeCompare(b.surname, 'it', { sensitivity: 'base' }))
+
+  const playerOptions = rosterPlayers.map((player) => `
+    <label class="ts-player-option">
+      <input type="checkbox" value="${tsEscapeHtml(player.displayName)}" data-canonical-name="${tsEscapeHtml(player.canonicalName)}">
+      <span>${tsEscapeHtml(player.displayName)}</span>
+    </label>
+  `).join('')
+
   return `
-    <section class="view page-view ts-editor-view">
-      <div class="page-head ts-editor-head">
+    <section class="view page-view ts-manual-editor" data-ts-manual-editor>
+      <div class="page-head ts-editor-titlebar">
         <div>
-          <h1>Training Sheet</h1>
-          <p><span>EDITOR</span><b>•</b>Dettatura, controllo e salvataggio automatico</p>
+          <h1>Training Sheet Editor</h1>
+          <p><span>CREAZIONE SEDUTA</span><b>•</b>Compila, controlla l’anteprima e genera il PDF</p>
         </div>
+        <div class="ts-draft-state" data-ts-draft-state><i></i><span>Bozza pronta</span></div>
       </div>
 
-      <div class="ts-editor-grid">
-        <article class="ts-editor-panel">
-          <div class="ts-panel-heading">
-            <div><span class="ts-step">1</span><h2>Dettatura</h2></div>
-            <span class="ts-badge">V6.1.3</span>
-          </div>
-          <p class="ts-panel-copy">Incolla qui la trascrizione dell'allenamento. Nella prossima release questo testo arriverà direttamente dal vocale.</p>
-          <textarea class="ts-narration" data-ts-narration placeholder="Esempio: Oggi 30 luglio siamo a Mezzolara e ci alleniamo alle 17:30..."></textarea>
-          <div class="ts-action-row">
-            <button class="primary-action" type="button" data-ts-analyze>Analizza seduta</button>
-            <button class="secondary-action" type="button" data-ts-clear>Pulisci</button>
-          </div>
-          <p class="form-message" data-ts-message></p>
-        </article>
+      <div class="ts-workspace">
+        <form class="ts-manual-form" data-ts-manual-form>
+          <section class="ts-form-card">
+            <div class="ts-card-head"><span>01</span><div><h2>Dati seduta</h2><p>Informazioni principali della sessione.</p></div></div>
+            <div class="ts-fields-grid">
+              <label class="ts-field"><span>Data</span><div class="ts-input-icon"><i>${icon('calendar')}</i><input name="date" type="date" required></div></label>
+              <label class="ts-field"><span>Orario</span><div class="ts-input-icon"><i>${icon('clock')}</i><input name="time" type="time" value="17:30" required></div></label>
+              <label class="ts-field"><span>Campo</span><select name="location"><option>Mezzolara</option><option>Budrio</option><option>Altro</option></select></label>
+              <label class="ts-field"><span>Allenamento n°</span><input name="progressive" type="number" min="1" value="1" readonly aria-readonly="true"></label>
+              <label class="ts-field"><span>Presenti</span><input name="present" type="number" min="0" value="28" readonly aria-readonly="true"><small class="ts-field-help">Calcolati automaticamente dalla Rosa</small></label>
+            </div>
 
-        <article class="ts-editor-panel ts-result-panel">
-          <div class="ts-panel-heading">
-            <div><span class="ts-step">2</span><h2>Dati strutturati</h2></div>
-            <span class="ts-status is-empty" data-ts-status>In attesa</span>
-          </div>
-          <div class="ts-empty-result" data-ts-empty>Analizza la dettatura per visualizzare i campi compilati automaticamente.</div>
-          <form class="ts-result-form" data-ts-form hidden></form>
-        </article>
+            <div class="ts-choice-block"><span class="ts-choice-label">Match Day</span><div class="ts-md-selector" data-ts-md-selector>
+              ${['MD+1','MD+2','MD+3','MD-3','MD-2','MD-1','MD'].map((md) => `<button type="button" data-md="${md}">${md}</button>`).join('')}
+              <input name="match_day" type="hidden">
+            </div></div>
+
+            <div class="ts-subsection-title"><span>CARICO</span><small>Focus fisico, intensità e volume</small></div>
+            <div class="ts-load-grid">
+              <label class="ts-field"><span>Focus fisico</span><select name="focus"><option value="">Seleziona</option><option>Metabolico</option><option>Forza</option><option>Resistenza alla velocità</option><option>Velocità</option></select></label>
+              <div class="ts-choice-block"><span class="ts-choice-label">Intensità</span><div class="ts-rating" data-rating="intensity">${[1,2,3,4,5].map(n=>`<button type="button" data-value="${n}">${n}</button>`).join('')}<input name="intensity" type="hidden"></div></div>
+              <div class="ts-choice-block"><span class="ts-choice-label">Volume</span><div class="ts-rating" data-rating="volume">${[1,2,3,4,5].map(n=>`<button type="button" data-value="${n}">${n}</button>`).join('')}<input name="volume" type="hidden"></div></div>
+            </div>
+          </section>
+
+          <section class="ts-form-card">
+            <div class="ts-card-head"><span>02</span><div><h2>Disponibilità rosa</h2><p>Seleziona più giocatori dall’elenco.</p></div></div>
+            <div class="ts-roster-grid">
+              <details class="ts-multiselect" data-player-select="absent"><summary><span>Assenti</span><b data-count>0 selezionati</b></summary><div class="ts-player-options">${playerOptions}</div></details>
+              <details class="ts-multiselect is-injured" data-player-select="injured"><summary><span>Infortunati</span><b data-count>0 selezionati</b></summary><div class="ts-player-options">${playerOptions}</div></details>
+            </div>
+          </section>
+
+          <section class="ts-form-card">
+            <div class="ts-card-head"><span>03</span><div><h2>Pilastri</h2><p>Seleziona uno o più riferimenti metodologici.</p></div></div>
+            <div class="ts-pillars" data-ts-pillars>
+              ${[
+                ['create','Creare il vantaggio'],['keep','Conservare il vantaggio'],['exploit','Sfruttare il vantaggio'],['defend','Difendere il vantaggio']
+              ].map(([key,label])=>`<label class="ts-pillar ts-pillar--${key}"><input type="checkbox" name="pillars" value="${label}"><span>${label}</span></label>`).join('')}
+            </div>
+          </section>
+
+          <section class="ts-form-card">
+            <div class="ts-card-head"><span>04</span><div><h2>Esercitazioni</h2><p>Descrivi la seduta nell’ordine reale di lavoro.</p></div></div>
+            <div class="ts-phases-editor" data-ts-phases></div>
+            <button class="ts-add-phase" type="button" data-add-phase>＋ Aggiungi esercitazione</button>
+          </section>
+
+          <section class="ts-form-card">
+            <div class="ts-card-head"><span>05</span><div><h2>Analisi finale</h2><p>L’analisi propone obiettivo e principi in base alle esercitazioni.</p></div></div>
+            <button class="ts-ai-button" type="button" data-analyze-exercises>✦ Analizza esercitazioni</button>
+            <p class="ts-ai-note" data-ai-note>Nessuna modifica viene pubblicata automaticamente.</p>
+            <label class="ts-field ts-field-full"><span>Obiettivo della seduta</span><textarea name="objective" rows="3" placeholder="Verrà proposto dopo l’analisi oppure puoi scriverlo manualmente."></textarea></label>
+            <label class="ts-field ts-field-full"><span>Principi di gioco</span><textarea name="principles" rows="4" placeholder="Verranno proposti dopo l’analisi oppure puoi scriverli manualmente."></textarea></label>
+          </section>
+        </form>
+
+        <aside class="ts-live-column">
+          <div class="ts-preview-toolbar"><div><span>ANTEPRIMA LIVE</span><strong>Training Sheet</strong></div><button type="button" data-print-sheet>${icon('sheet')}<span>Crea PDF</span></button></div>
+          <div class="ts-paper-frame"><article class="ts-paper" data-ts-preview></article></div>
+          <p class="ts-publish-note" data-publish-note>Usa “Crea PDF” e scegli “Salva come PDF” nella finestra di stampa.</p>
+        </aside>
       </div>
     </section>
   `
@@ -1841,7 +1910,7 @@ export async function attachAppEvents(user) {
   document.body.classList.remove('drawer-open', 'new-event-modal-open')
   document.body.style.removeProperty('overflow')
 
-  if (key === 'calendar' || key === 'dashboard' || key === 'library') {
+  if (key === 'calendar' || key === 'dashboard' || key === 'library' || key === 'training-sheet') {
     await loadCalendarEvents()
   }
 
@@ -2398,6 +2467,160 @@ export async function attachAppEvents(user) {
   }
 
   async function bindDynamic() {
+    const manualEditor = root.querySelector('[data-ts-manual-editor]')
+    if (manualEditor) {
+      const form = manualEditor.querySelector('[data-ts-manual-form]')
+      const preview = manualEditor.querySelector('[data-ts-preview]')
+      const phasesRoot = manualEditor.querySelector('[data-ts-phases]')
+      const draftState = manualEditor.querySelector('[data-ts-draft-state] span')
+      const storageKey = 'nz-training-sheet-editor-v6-2'
+      let phaseCount = 0
+      let saveTimer = null
+
+      const escape = (value='') => String(value).replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[char]))
+      const selectedPlayers = (type) => [...manualEditor.querySelectorAll(`[data-player-select="${type}"] input:checked`)].map(input => input.value)
+      const selectedPillars = () => [...form.querySelectorAll('[name="pillars"]:checked')].map(input => input.value)
+      const squadTotal = 0 || players.length
+      const updatePresentCount = () => {
+        const unavailable = new Set([...selectedPlayers('absent'), ...selectedPlayers('injured')])
+        const present = Math.max(0, squadTotal - unavailable.size)
+        if (form.elements.present) form.elements.present.value = String(present)
+        return present
+      }
+
+      const addPhase = (data = {}) => {
+        const index = phaseCount++
+        phasesRoot.insertAdjacentHTML('beforeend', `
+          <article class="ts-phase-editor" data-phase>
+            <div class="ts-phase-editor-head"><strong>FASE ${index + 1}</strong><button type="button" data-remove-phase aria-label="Rimuovi">×</button></div>
+            <div class="ts-phase-compact">
+              <label class="ts-field"><span>Titolo</span><input name="phase_title_${index}" value="${escape(data.title || '')}" placeholder="Es. Attivazione, Gioco di posizione, Possesso"></label>
+              <label class="ts-field"><span>Durata</span><input name="phase_duration_${index}" type="number" min="1" value="${escape(data.duration || '')}" placeholder="10"></label>
+              <label class="ts-field"><span>Portieri</span><select name="phase_goalkeepers_${index}"><option value="no" ${(!data.goalkeepers || data.goalkeepers==='no')?'selected':''}>No</option><option value="yes" ${data.goalkeepers==='yes'?'selected':''}>Sì</option><option value="separate" ${data.goalkeepers==='separate'?'selected':''}>Lavoro separato</option></select></label>
+            </div>
+            <label class="ts-field ts-field-full"><span>Descrizione esercitazione</span><textarea name="phase_description_${index}" rows="4" placeholder="Organizzazione, numeri, spazi, regole e obiettivi...">${escape(data.description || '')}</textarea></label>
+            <div class="ts-phase-compact two">
+              <label class="ts-field"><span>Varianti</span><textarea name="phase_variants_${index}" rows="2">${escape(data.variants || '')}</textarea></label>
+              <label class="ts-field"><span>Coaching point</span><textarea name="phase_coaching_${index}" rows="2">${escape(data.coaching || '')}</textarea></label>
+            </div>
+          </article>
+        `)
+        phasesRoot.lastElementChild.querySelector('[data-remove-phase]').addEventListener('click', (event) => {
+          event.currentTarget.closest('[data-phase]').remove(); updatePreview(); scheduleSave()
+        })
+      }
+
+      const collect = () => {
+        const fd = new FormData(form)
+        const phases = [...phasesRoot.querySelectorAll('[data-phase]')].map((node) => {
+          const title = node.querySelector('[name^="phase_title_"]')?.value || ''
+          const duration = node.querySelector('[name^="phase_duration_"]')?.value || ''
+          const goalkeepers = node.querySelector('[name^="phase_goalkeepers_"]')?.value || ''
+          const description = node.querySelector('[name^="phase_description_"]')?.value || ''
+          const variants = node.querySelector('[name^="phase_variants_"]')?.value || ''
+          const coaching = node.querySelector('[name^="phase_coaching_"]')?.value || ''
+          return { title, duration, goalkeepers, description, variants, coaching }
+        })
+        return {
+          date: fd.get('date') || '', time: fd.get('time') || '', location: fd.get('location') || '', progressive: fd.get('progressive') || '', present: updatePresentCount(), focus: fd.get('focus') || '', match_day: fd.get('match_day') || '', intensity: fd.get('intensity') || '', volume: fd.get('volume') || '', objective: fd.get('objective') || '', principles: fd.get('principles') || '', pillars: selectedPillars(), absent: selectedPlayers('absent'), injured: selectedPlayers('injured'), phases
+        }
+      }
+
+      const bar = (value) => `<span class="ts-mini-scale">${[1,2,3,4,5].map(n=>`<i class="${Number(value)>=n?'on':''}"></i>`).join('')}</span>`
+      const updatePreview = () => {
+        const d = collect()
+        const formattedDate = d.date ? new Date(`${d.date}T12:00:00`).toLocaleDateString('it-IT') : '—'
+        const total = d.phases.reduce((sum,p)=>sum+(Number(p.duration)||0),0)
+        preview.innerHTML = `
+          <header class="ts-paper-head"><div class="ts-paper-brand"><b>NZ</b><span>NICOLA ZECCHI</span></div><div class="ts-paper-title"><small>TRAINING SHEET</small><strong>ALL_${String(d.progressive || '---').padStart(3,'0')}</strong></div></header>
+          <div class="ts-paper-meta"><span><small>Data</small><b>${escape(formattedDate)}</b></span><span><small>Ora</small><b>${escape(d.time || '—')}</b></span><span><small>Campo</small><b>${escape(d.location || '—')}</b></span><span><small>Presenti</small><b>${escape(d.present || '—')}</b></span><span class="ts-paper-md ts-md-${escape((d.match_day || 'none').replace('+','plus').replace('-','minus').toLowerCase())}">${escape(d.match_day || 'MD —')}</span></div>
+          <div class="ts-paper-load"><span><small>Focus fisico</small><b>${escape(d.focus || '—')}</b></span><span><small>Intensità</small>${bar(d.intensity)}</span><span><small>Volume</small>${bar(d.volume)}</span><span><small>Durata</small><b>${total || '—'}'</b></span></div>
+          <section class="ts-paper-pillars">${['Creare il vantaggio','Conservare il vantaggio','Sfruttare il vantaggio','Difendere il vantaggio'].map((p,i)=>`<span class="pillar-${i+1} ${d.pillars.includes(p)?'is-selected':'is-muted'}">${escape(p)}</span>`).join('')}</section>
+          <section class="ts-paper-roster"><div><small>ASSENTI</small><p>${d.absent.length?d.absent.map(n=>`<span>${escape(n)}</span>`).join(''):'<em>Nessuno</em>'}</p></div><div class="inj"><small>INFORTUNATI</small><p>${d.injured.length?d.injured.map(n=>`<span>${escape(n)}</span>`).join(''):'<em>Nessuno</em>'}</p></div></section>
+          <section class="ts-paper-objectives"><div><small>OBIETTIVO</small><p>${escape(d.objective || 'Da definire')}</p></div><div><small>PRINCIPI</small><p>${escape(d.principles || 'Da definire')}</p></div></section>
+          <section class="ts-paper-body"><div class="ts-paper-phases">${d.phases.length ? d.phases.map((p,i)=>`<article><div><b>${String(i+1).padStart(2,'0')}</b><strong>FASE ${i+1}${p.title?` · ${escape(p.title)}`:''}</strong><span class="ts-phase-gk">Portieri: ${p.goalkeepers==='yes'?'Sì':p.goalkeepers==='separate'?'Separati':'No'}</span><span>${escape(p.duration || '—')}'</span></div><p>${escape(p.description || 'Descrizione da completare')}</p>${p.variants?`<small><b>Varianti:</b> ${escape(p.variants)}</small>`:''}${p.coaching?`<small><b>Coaching point:</b> ${escape(p.coaching)}</small>`:''}</article>`).join('') : '<p class="ts-paper-empty">Aggiungi la prima fase.</p>'}</div></section>
+        `
+      }
+
+      const saveDraft = () => {
+        localStorage.setItem(storageKey, JSON.stringify(collect()))
+        if (draftState) draftState.textContent = 'Bozza salvata'
+      }
+      const scheduleSave = () => {
+        if (draftState) draftState.textContent = 'Salvataggio…'
+        clearTimeout(saveTimer); saveTimer = setTimeout(saveDraft, 450)
+      }
+      const restore = () => {
+        const raw = localStorage.getItem(storageKey)
+        if (!raw) { addPhase(); return }
+        try {
+          const d=JSON.parse(raw)
+          Object.entries(d).forEach(([key,value])=>{ const field=form.elements.namedItem(key); if(field && !Array.isArray(value)) field.value=value ?? '' })
+          d.phases?.length ? d.phases.forEach(addPhase) : addPhase()
+          d.pillars?.forEach(v=>{ const el=[...form.querySelectorAll('[name="pillars"]')].find(i=>i.value===v); if(el) el.checked=true })
+          ;['absent','injured'].forEach(type=>d[type]?.forEach(v=>{ const el=[...manualEditor.querySelectorAll(`[data-player-select="${type}"] input`)].find(i=>i.value===v); if(el) el.checked=true }))
+          manualEditor.querySelectorAll('[data-md]').forEach(b=>b.classList.toggle('is-active',b.dataset.md===d.match_day))
+          manualEditor.querySelectorAll('[data-rating]').forEach(group=>group.querySelectorAll('button').forEach(b=>b.classList.toggle('is-active',Number(b.dataset.value)<=Number(d[group.dataset.rating]||0))))
+        } catch { addPhase() }
+      }
+      const updateCounts = () => {
+        manualEditor.querySelectorAll('[data-player-select]').forEach(box=>{
+          const count=box.querySelectorAll('input:checked').length
+          box.querySelector('[data-count]').textContent=`${count} selezionati`
+        })
+        updatePresentCount()
+      }
+
+      manualEditor.querySelector('[data-add-phase]')?.addEventListener('click',()=>{addPhase();updatePreview();scheduleSave()})
+      manualEditor.querySelectorAll('[data-md]').forEach(button=>button.addEventListener('click',()=>{ manualEditor.querySelectorAll('[data-md]').forEach(b=>b.classList.remove('is-active')); button.classList.add('is-active'); form.elements.match_day.value=button.dataset.md; updatePreview(); scheduleSave() }))
+      manualEditor.querySelectorAll('[data-rating]').forEach(group=>group.querySelectorAll('button').forEach(button=>button.addEventListener('click',()=>{ const value=Number(button.dataset.value); group.querySelector('input').value=value; group.querySelectorAll('button').forEach(b=>b.classList.toggle('is-active',Number(b.dataset.value)<=value)); updatePreview(); scheduleSave() })))
+      manualEditor.querySelectorAll('[data-player-select] input').forEach((input) => {
+        input.addEventListener('change', () => {
+          if (input.checked) {
+            const currentType = input.closest('[data-player-select]')?.dataset.playerSelect
+            const otherType = currentType === 'absent' ? 'injured' : 'absent'
+            const twin = [...manualEditor.querySelectorAll(`[data-player-select="${otherType}"] input`)]
+              .find((candidate) => candidate.value === input.value)
+            if (twin) twin.checked = false
+          }
+        })
+      })
+      form.addEventListener('input',()=>{updateCounts();updatePreview();scheduleSave()})
+      form.addEventListener('change',()=>{updateCounts();updatePreview();scheduleSave()})
+      manualEditor.querySelector('[data-analyze-exercises]')?.addEventListener('click',()=>{
+        const d=collect(); const text=d.phases.map(p=>`${p.title} ${p.description}`).join(' ').toLowerCase(); const pillars=d.pillars
+        const objectiveBits=[]; const principles=[]
+        if(/costru|uscita|portiere|prima pressione/.test(text)){objectiveBits.push('creare vantaggio nella costruzione sotto pressione');principles.push('occupazione razionale degli spazi','ricerca dell’uomo libero','sostegno al possessore')}
+        if(/possesso|rondo|jolly|conserv/.test(text)){objectiveBits.push('conservare il possesso con continuità');principles.push('smarcamento in appoggio','mobilità','qualità del primo controllo')}
+        if(/final|porta|attacco|invasione|profond/.test(text)){objectiveBits.push('sfruttare il vantaggio per arrivare alla finalizzazione');principles.push('attacco della profondità','occupazione dell’area','tempi di inserimento')}
+        if(/press|riaggress|transizione|riconquista/.test(text)){objectiveBits.push('proteggere il vantaggio attraverso pressione e riaggressione');principles.push('reazione immediata alla perdita','densità vicino alla palla','coperture preventive')}
+        if(!objectiveBits.length) objectiveBits.push(pillars.length ? pillars.join(', ').toLowerCase() : 'sviluppare i comportamenti collettivi previsti dalla seduta')
+        form.elements.objective.value=objectiveBits.join('; ').replace(/^./,c=>c.toUpperCase())+'.'
+        form.elements.principles.value=[...new Set(principles)].join(', ') || 'Distanze funzionali, comunicazione, orientamento del corpo e velocità di esecuzione.'
+        const note=manualEditor.querySelector('[data-ai-note]'); if(note) note.textContent='Proposta inserita: controlla e modifica liberamente i due campi.'
+        updatePreview();scheduleSave()
+      })
+      const determineNextProgressive = () => {
+        const fromPaths = calendarEvents
+          .map((event) => event.trainingSheetPath || '')
+          .map((path) => Number(path.match(/(?:ALL|AL)[_-]?(\d{1,3})/i)?.[1] || 0))
+        const storedNext = Number(localStorage.getItem('nz-training-sheet-next-progressive') || 0)
+        return Math.max(1, storedNext, ...fromPaths.map((value) => value + 1))
+      }
+      const printSheet=()=>{
+        const current = Number(form.elements.progressive?.value || 1)
+        localStorage.setItem('nz-training-sheet-next-progressive', String(current + 1))
+        window.print()
+      }
+      manualEditor.querySelector('[data-print-sheet]')?.addEventListener('click',printSheet)
+      restore()
+      const nextProgressive = determineNextProgressive()
+      if (form.elements.progressive && Number(form.elements.progressive.value || 0) < nextProgressive) {
+        form.elements.progressive.value = String(nextProgressive)
+      }
+      updateCounts();updatePreview()
+    }
+
     root
       .querySelectorAll('[data-open-event]')
       .forEach((button) => {
@@ -2614,6 +2837,11 @@ export async function attachAppEvents(user) {
 
 
     const tsNarration = root.querySelector('[data-ts-narration]')
+    const tsRecordButton = root.querySelector('[data-ts-record]')
+    const tsStopButton = root.querySelector('[data-ts-stop]')
+    const tsRecordLabel = root.querySelector('[data-ts-record-label]')
+    const tsVoiceStatus = root.querySelector('[data-ts-voice-status]')
+    const tsVoiceHelp = root.querySelector('[data-ts-voice-help]')
     const tsForm = root.querySelector('[data-ts-form]')
     const tsEmpty = root.querySelector('[data-ts-empty]')
     const tsStatus = root.querySelector('[data-ts-status]')
@@ -2622,6 +2850,138 @@ export async function attachAppEvents(user) {
     let tsAutosaveTimer = null
     let tsSaving = false
     let tsSaveQueued = false
+    let tsRecognition = null
+    let tsRecognitionActive = false
+    let tsRecognitionShouldRestart = false
+    let tsRecognitionBaseText = ''
+    let tsRecognitionFinalText = ''
+
+    const SpeechRecognitionApi = window.SpeechRecognition || window.webkitSpeechRecognition
+
+    const setTsVoiceState = (state, text) => {
+      if (tsVoiceStatus) {
+        tsVoiceStatus.textContent = text
+        tsVoiceStatus.className = `ts-voice-status is-${state}`
+      }
+      if (tsRecordButton) {
+        tsRecordButton.classList.toggle('is-recording', state === 'recording')
+        tsRecordButton.disabled = state === 'unsupported' || state === 'starting'
+      }
+      if (tsStopButton) tsStopButton.disabled = state !== 'recording' && state !== 'starting'
+      if (tsRecordLabel) tsRecordLabel.textContent = state === 'recording' ? 'In ascolto…' : 'Registra'
+    }
+
+    const normalizeTsSpeechText = (value = '') => String(value)
+      .replace(/\s+([,.;:!?])/g, '$1')
+      .replace(/\s+/g, ' ')
+      .trim()
+
+    const joinTsSpeechText = (...parts) => parts
+      .map(part => normalizeTsSpeechText(part))
+      .filter(Boolean)
+      .join(' ')
+      .trim()
+
+    const stopTsRecognition = () => {
+      tsRecognitionShouldRestart = false
+      if (tsRecognition && tsRecognitionActive) {
+        try { tsRecognition.stop() } catch (error) { console.warn('Arresto microfono non riuscito:', error) }
+      } else {
+        tsRecognitionActive = false
+        setTsVoiceState(SpeechRecognitionApi ? 'ready' : 'unsupported', SpeechRecognitionApi ? 'Microfono pronto' : 'Dettatura non supportata')
+      }
+    }
+
+    const createTsRecognition = () => {
+      if (!SpeechRecognitionApi || tsRecognition) return tsRecognition
+
+      const recognition = new SpeechRecognitionApi()
+      recognition.lang = 'it-IT'
+      recognition.continuous = true
+      recognition.interimResults = true
+      recognition.maxAlternatives = 1
+
+      recognition.onstart = () => {
+        tsRecognitionActive = true
+        setTsVoiceState('recording', 'Registrazione in corso')
+        if (tsVoiceHelp) tsVoiceHelp.textContent = 'Parla normalmente. Il testo compare mentre detti.'
+      }
+
+      recognition.onresult = (event) => {
+        let interimText = ''
+        for (let index = event.resultIndex; index < event.results.length; index += 1) {
+          const transcript = event.results[index][0]?.transcript || ''
+          if (event.results[index].isFinal) tsRecognitionFinalText = joinTsSpeechText(tsRecognitionFinalText, transcript)
+          else interimText = joinTsSpeechText(interimText, transcript)
+        }
+        if (tsNarration) {
+          tsNarration.value = joinTsSpeechText(tsRecognitionBaseText, tsRecognitionFinalText, interimText)
+          tsNarration.dispatchEvent(new Event('input', { bubbles: true }))
+          tsNarration.scrollTop = tsNarration.scrollHeight
+        }
+      }
+
+      recognition.onerror = (event) => {
+        const messages = {
+          'not-allowed': 'Permesso microfono negato. Abilitalo nelle impostazioni del sito.',
+          'service-not-allowed': 'Servizio di dettatura non disponibile nel browser.',
+          'audio-capture': 'Microfono non trovato o non disponibile.',
+          'no-speech': 'Non ho rilevato la voce. Premi Registra e riprova.',
+          network: 'Connessione necessaria per la dettatura del browser.',
+          aborted: 'Registrazione interrotta.',
+        }
+        const message = messages[event.error] || `Errore microfono: ${event.error}`
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed' || event.error === 'audio-capture') {
+          tsRecognitionShouldRestart = false
+        }
+        setTsVoiceState('error', message)
+      }
+
+      recognition.onend = () => {
+        tsRecognitionActive = false
+        if (tsRecognitionShouldRestart) {
+          window.setTimeout(() => {
+            if (!tsRecognitionShouldRestart) return
+            try { recognition.start() } catch (error) {
+              tsRecognitionShouldRestart = false
+              setTsVoiceState('error', 'Impossibile riavviare il microfono. Premi Registra.')
+            }
+          }, 250)
+          return
+        }
+        tsRecognitionBaseText = joinTsSpeechText(tsRecognitionBaseText, tsRecognitionFinalText)
+        tsRecognitionFinalText = ''
+        setTsVoiceState('ready', tsNarration?.value.trim() ? 'Trascrizione pronta' : 'Microfono pronto')
+        if (tsVoiceHelp) tsVoiceHelp.textContent = 'Puoi correggere il testo e poi premere “Analizza seduta”.'
+      }
+
+      tsRecognition = recognition
+      return recognition
+    }
+
+    if (!SpeechRecognitionApi) {
+      setTsVoiceState('unsupported', 'Dettatura non supportata da questo browser')
+      if (tsVoiceHelp) tsVoiceHelp.textContent = 'Apri il Coach Portal con Google Chrome o Microsoft Edge aggiornato.'
+    } else {
+      setTsVoiceState('ready', 'Microfono pronto')
+    }
+
+    tsRecordButton?.addEventListener('click', () => {
+      if (!SpeechRecognitionApi || tsRecognitionActive) return
+      const recognition = createTsRecognition()
+      tsRecognitionBaseText = tsNarration?.value.trim() || ''
+      tsRecognitionFinalText = ''
+      tsRecognitionShouldRestart = true
+      setTsVoiceState('starting', 'Attivazione microfono…')
+      try {
+        recognition.start()
+      } catch (error) {
+        tsRecognitionShouldRestart = false
+        setTsVoiceState('error', 'Microfono già attivo o momentaneamente non disponibile.')
+      }
+    })
+
+    tsStopButton?.addEventListener('click', stopTsRecognition)
 
     const setTsSaveState = (state, text) => {
       const saveMessage = tsForm?.querySelector('[data-ts-save-message]')
@@ -2778,7 +3138,10 @@ export async function attachAppEvents(user) {
     }
 
     root.querySelector('[data-ts-clear]')?.addEventListener('click', () => {
+      stopTsRecognition()
       window.clearTimeout(tsAutosaveTimer)
+      tsRecognitionBaseText = ''
+      tsRecognitionFinalText = ''
       tsDraftId = null
       if (tsNarration) tsNarration.value = ''
       if (tsForm) { tsForm.hidden = true; tsForm.innerHTML = ''; delete tsForm.dataset.parserResult }
@@ -2795,7 +3158,7 @@ export async function attachAppEvents(user) {
         return
       }
 
-      const result = parseTrainingSheetNarration(text)
+      const result = parseTrainingSheetNarration(text, players)
       tsMessage.textContent = 'Seduta analizzata. La bozza viene salvata automaticamente.'
       tsMessage.className = 'form-message is-success'
       tsEmpty.hidden = true

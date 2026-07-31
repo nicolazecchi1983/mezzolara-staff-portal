@@ -1,0 +1,22 @@
+V6.2 - TRAINING SHEET EDITOR MANUALE
+
+IMPLEMENTATO
+- Editor riservato al ruolo admin.
+- Compilazione manuale responsive.
+- Anteprima live nella stessa schermata.
+- Match Day MD+1, MD+2, MD+3, MD-3, MD-2, MD-1, MD con badge.
+- Pilastri: Creare, Conservare, Sfruttare, Difendere il vantaggio.
+- Assenti e infortunati con selezione multipla dalla Rosa.
+- Fasi dinamiche, durata, portieri, descrizione, varianti/coaching point.
+- Analisi finale delle esercitazioni e proposta modificabile di obiettivo/principi.
+- Autosalvataggio locale della bozza per utente.
+- Anteprima stampabile in formato A4 tramite “Salva come PDF”.
+- Layout desktop a due colonne e layout smartphone verticale.
+
+NOTA TECNICA
+La pubblicazione automatica del PDF in Supabase Storage e il collegamento al calendario richiedono una successiva integrazione backend/Storage con policy RLS. Il pulsante attuale genera il PDF attraverso la stampa del browser senza fingere un caricamento non configurato.
+
+VERIFICHE
+- Controllo sintattico JavaScript: superato con node --check.
+- Microfono e parser non sono più utilizzati dall'Editor.
+- Cartelle .git, node_modules e dist escluse dal pacchetto di consegna.

@@ -1,0 +1,10 @@
+NZ V6.2.2 — Correzioni operative Training Sheet Editor
+
+- Focus fisico limitato a: Metabolico, Forza, Resistenza alla velocità, Velocità.
+- Rosa ordinata alfabeticamente per cognome e mostrata nel formato COGNOME Nome.
+- Assenti e infortunati mutuamente esclusivi; presenti calcolati automaticamente sul totale Rosa.
+- Portieri mostrati sulla stessa riga del titolo e della durata della fase.
+- Match Day e Pilastri mantengono i colori anche in stampa/PDF.
+- Progressivo Training Sheet automatico, derivato dai PDF già collegati e mantenuto localmente.
+- Icona e nome Training Sheet Editor corretti nella navigazione.
+- Stampa A4 corretta con box sizing, colori esatti e rimozione delle pagine vuote causate dal layout.

@@ -18,12 +18,34 @@ export const recentActivity = [
 ]
 
 export const players = [
+  { initials: 'MC', name: 'Matteo Cipriani', year: '', role: 'Da definire', foot: '', status: 'Disponibile' },
+  { initials: 'NC', name: 'Niccolò Cacciamani', year: '2008', role: 'Attaccante', foot: 'DX', status: 'Disponibile' },
+  { initials: 'BB', name: 'Berardo Bungaja', year: '', role: 'Da definire', foot: '', status: 'Disponibile' },
+  { initials: 'SC', name: 'Said Chmangui', year: '', role: 'Da definire', foot: '', status: 'Disponibile' },
+  { initials: 'FF', name: 'Filippo Fabbri', year: '', role: 'Da definire', foot: '', status: 'Disponibile' },
   { initials: 'TN', name: 'Tommaso Nistor', year: '2006', role: 'Portiere', foot: 'DX', status: 'Disponibile' },
-  { initials: 'AM', name: 'Andrea Morelli', year: '2008', role: 'Difensore', foot: 'DX', status: 'Disponibile' },
-  { initials: 'EM', name: 'Eddie Martusciello', year: '2008', role: 'Centrocampista', foot: 'SX', status: 'Disponibile' },
-  { initials: 'GC', name: 'Gabriele Cacciamani', year: '2008', role: 'Attaccante', foot: 'DX', status: 'Da verificare' },
+  { initials: 'RF', name: 'Riccardo Fusari', year: '', role: 'Da definire', foot: '', status: 'Disponibile' },
+  { initials: 'MM', name: 'Manuel Musiani', year: '', role: 'Da definire', foot: '', status: 'Disponibile' },
+  { initials: 'TP', name: 'Tommaso Pietrobuoni', year: '', role: 'Da definire', foot: '', status: 'Disponibile' },
+  { initials: 'ML', name: 'Manuel Lugaro', year: '2009', role: 'Da definire', foot: '', status: 'Disponibile' },
+  { initials: 'EA', name: 'Enis Ayari', year: '2008', role: 'Da definire', foot: '', status: 'Disponibile' },
+  { initials: 'AC', name: 'Andrea Capece', year: '2008', role: 'Da definire', foot: '', status: 'Disponibile' },
+  { initials: 'FD', name: 'Filippo Di Lieto', year: '2009', role: 'Da definire', foot: '', status: 'Disponibile' },
+  { initials: 'GG', name: 'Giuliano Guida', year: '', role: 'Da definire', foot: '', status: 'Disponibile' },
+  { initials: 'DC', name: 'Diego Compagnone', year: '', role: 'Da definire', foot: '', status: 'Disponibile' },
+  { initials: 'EE', name: 'Edoardo Eleonori', year: '', role: 'Da definire', foot: '', status: 'Disponibile' },
   { initials: 'MM', name: 'Matteo Morisi', year: '2006', role: 'Difensore', foot: 'SX', status: 'Disponibile' },
+  { initials: 'AE', name: 'Andrea Errichiello', year: '', role: 'Da definire', foot: '', status: 'Disponibile' },
+  { initials: 'GB', name: 'Giuseppe Brugnoli', year: '2007', role: 'Da definire', foot: '', status: 'Disponibile' },
+  { initials: 'MM', name: 'Marcello Morelli', year: '2008', role: 'Da definire', foot: '', status: 'Disponibile' },
+  { initials: 'LB', name: 'Luca Battistini', year: '', role: 'Da definire', foot: '', status: 'Disponibile' },
+  { initials: 'SS', name: 'Simone Salonia', year: '', role: 'Da definire', foot: '', status: 'Disponibile' },
+  { initials: 'HL', name: 'Hamza Larib', year: '', role: 'Da definire', foot: '', status: 'Disponibile' },
   { initials: 'AL', name: 'Andrea Lantignotti', year: '2007', role: 'Esterno', foot: 'DX', status: 'Disponibile' },
+  { initials: 'FS', name: 'Federico Sala', year: '', role: 'Da definire', foot: '', status: 'Disponibile' },
+  { initials: 'EM', name: 'Eddy Martuzzi', year: '2008', role: 'Centrocampista', foot: 'SX', status: 'Disponibile' },
+  { initials: 'GM', name: 'Gabriele Mazzetti', year: '2007', role: 'Da definire', foot: '', status: 'Disponibile' },
+  { initials: 'AG', name: 'Andrea Giovannini', year: '2007', role: 'Da definire', foot: '', status: 'Disponibile' },
 ]
 
 export const analysisItems = [

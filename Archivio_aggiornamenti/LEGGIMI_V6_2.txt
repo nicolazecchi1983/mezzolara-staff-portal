@@ -1,0 +1,34 @@
+NZ V6.2 — PONTE AUDIO TRAINING SHEET
+
+FILE DA SOSTITUIRE:
+1. src/components/app.js
+2. src/style.css
+
+NON SERVE:
+- SQL Supabase
+- modificare .env
+- copiare node_modules
+- copiare dist
+- toccare .git
+
+FUNZIONI INSERITE:
+- pulsante Registra
+- pulsante Interrompi
+- trascrizione italiana direttamente nel campo Dettatura
+- testo provvisorio visibile mentre si parla
+- gestione permessi ed errori microfono
+- compatibilità prevista con Chrome/Edge
+- passaggio invariato al pulsante Analizza seduta
+- autosalvataggio esistente mantenuto
+
+TEST:
+1. npm run dev
+2. aprire Training Sheet con Chrome
+3. premere Registra
+4. consentire il microfono
+5. dettare una breve seduta
+6. premere Interrompi
+7. correggere eventualmente il testo
+8. premere Analizza seduta
+9. verificare compilazione e autosalvataggio
+10. npm run build
