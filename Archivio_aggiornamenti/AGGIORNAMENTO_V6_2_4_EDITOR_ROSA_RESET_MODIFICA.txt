@@ -1,0 +1,11 @@
+V6.2.4 - Training Sheet Editor
+
+- Nomi Rosa in formato Nome Cognome con sole iniziali maiuscole.
+- Andrea Giovannini rimosso.
+- Rosa divisa per reparti e ordinata per cognome dentro ogni reparto.
+- Pulsante Reset editor con conferma.
+- Sezione Training Sheet Editor ripristinata al nuovo accesso.
+- Blocco Carico riallineato graficamente.
+- Selettore Apri Training Sheet per modificare una TS pubblicata.
+- I dati compilabili vengono salvati nei metadati dell'evento Supabase e possono essere riaperti anche da un altro dispositivo.
+- Compatibilità con vecchie TS: vengono caricati almeno data, ora, campo, Match Day e progressivo; i contenuti non presenti nei vecchi metadati vanno ricompilati.

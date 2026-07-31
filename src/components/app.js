@@ -178,6 +178,7 @@ async function loadCalendarEvents() {
         squadTotal: event.squad_total ?? null,
         trainingSheetPath,
         trainingSheetUrl,
+        editorData: (() => { try { const parsed = JSON.parse(event.notes || '{}'); return parsed?.type === 'training_sheet_editor' ? parsed.data : null } catch { return null } })(),
       }
     }),
   )
@@ -974,26 +975,37 @@ function trainingSheetEditorView() {
     `
   }
 
+  const titleCaseName = (value = '') => String(value).toLocaleLowerCase('it-IT').replace(/(^|[\s'’-])([a-zà-ÿ])/g, (_, prefix, letter) => prefix + letter.toLocaleUpperCase('it-IT'))
+  const departmentOrder = ['Portiere', 'Difensore', 'Centrocampista', 'Attaccante']
+  const departmentLabels = { Portiere: 'Portieri', Difensore: 'Difensori', Centrocampista: 'Centrocampisti', Attaccante: 'Attaccanti' }
   const rosterPlayers = players
+    .filter((player) => player.name !== 'Andrea Giovannini')
     .map((player) => {
-      const parts = player.name.trim().split(/\s+/)
+      const cleanName = titleCaseName(player.name)
+      const parts = cleanName.trim().split(/\s+/)
       const surname = parts.pop() || ''
       const firstName = parts.join(' ')
-      return {
-        ...player,
-        canonicalName: player.name,
-        displayName: `${surname.toUpperCase()} ${firstName}`.trim(),
-        surname,
-      }
+      return { ...player, canonicalName: cleanName, displayName: `${firstName} ${surname}`.trim(), surname, department: departmentOrder.includes(player.role) ? player.role : 'Difensore' }
     })
     .sort((a, b) => a.surname.localeCompare(b.surname, 'it', { sensitivity: 'base' }))
 
-  const playerOptions = rosterPlayers.map((player) => `
-    <label class="ts-player-option">
-      <input type="checkbox" value="${tsEscapeHtml(player.displayName)}" data-canonical-name="${tsEscapeHtml(player.canonicalName)}">
-      <span>${tsEscapeHtml(player.displayName)}</span>
-    </label>
-  `).join('')
+  const playerOptions = departmentOrder.map((department) => {
+    const rows = rosterPlayers.filter((player) => player.department === department).map((player) => `
+      <label class="ts-player-option">
+        <input type="checkbox" value="${tsEscapeHtml(player.displayName)}" data-canonical-name="${tsEscapeHtml(player.canonicalName)}">
+        <span>${tsEscapeHtml(player.displayName)}</span>
+      </label>`).join('')
+    return `<div class="ts-roster-department"><strong>${departmentLabels[department]}</strong>${rows}</div>`
+  }).join('')
+
+  const editableSheets = calendarEvents
+    .filter((event) => event.trainingSheetPath)
+    .sort((a, b) => new Date(b.startAt) - new Date(a.startAt))
+    .map((event) => {
+      const date = new Date(event.startAt).toLocaleDateString('it-IT')
+      const code = event.trainingSheetPath.match(/(?:ALL|AL)[_-]?(\d{1,3})/i)?.[1] || ''
+      return `<option value="${tsEscapeHtml(event.id)}">${code ? `ALL_${String(code).padStart(3, '0')} · ` : ''}${date} · ${tsEscapeHtml(event.place || 'Campo da definire')}</option>`
+    }).join('')
 
   return `
     <section class="view page-view ts-manual-editor" data-ts-manual-editor>
@@ -1002,7 +1014,11 @@ function trainingSheetEditorView() {
           <h1>Training Sheet Editor</h1>
           <p><span>CREAZIONE SEDUTA</span><b>•</b>Compila, controlla l’anteprima e genera il PDF</p>
         </div>
-        <div class="ts-draft-state" data-ts-draft-state><i></i><span>Bozza pronta</span></div>
+        <div class="ts-editor-actions">
+          <label class="ts-open-sheet"><span>Apri Training Sheet</span><select data-open-training-sheet><option value="">Seleziona una TS pubblicata</option>${editableSheets}</select></label>
+          <button class="ts-reset-button" type="button" data-reset-training-sheet>Reset editor</button>
+          <div class="ts-draft-state" data-ts-draft-state><i></i><span>Bozza pronta</span></div>
+        </div>
       </div>
 
       <div class="ts-workspace">
@@ -2667,6 +2683,7 @@ export async function attachAppEvents(user) {
             location: d.location || null, match_day: d.match_day || null,
             present_count: Number(d.present) || 0, squad_total: squadTotal,
             training_sheet_path: filePath,
+            notes: JSON.stringify({ type: 'training_sheet_editor', version: 1, data: d }),
           }
           const result = existingEvent
             ? await supabase.from('events').update(eventPayload).eq('id', existingEvent.id)
@@ -2678,6 +2695,7 @@ export async function attachAppEvents(user) {
 
           pdf.save(fileName)
           localStorage.setItem('nz-training-sheet-next-progressive', String(Number(d.progressive || 1) + 1))
+          localStorage.setItem(`nz-training-sheet:${filePath}`, JSON.stringify(d))
           await loadCalendarEvents()
           if (note) note.textContent = 'PDF creato e Training Sheet collegata al Calendario.'
           if (draftState) draftState.textContent = 'Pubblicata'
@@ -2690,6 +2708,47 @@ export async function attachAppEvents(user) {
           if (button.querySelector('span')) button.querySelector('span').textContent = originalLabel
         }
       }
+      const resetEditor = () => {
+        if (!window.confirm('Vuoi cancellare tutti i campi della Training Sheet Editor?')) return
+        localStorage.removeItem(storageKey)
+        form.reset()
+        form.elements.time.value = '17:30'
+        form.elements.location.value = 'Mezzolara'
+        manualEditor.querySelectorAll('[data-md] button, [data-md]').forEach?.(() => {})
+        manualEditor.querySelectorAll('[data-md]').forEach((button) => button.classList.remove('is-active'))
+        manualEditor.querySelectorAll('[data-rating] button').forEach((button) => button.classList.remove('is-active'))
+        manualEditor.querySelectorAll('[data-player-select] input').forEach((input) => { input.checked = false })
+        manualEditor.querySelectorAll('[name="pillars"]')?.forEach?.((input) => { input.checked = false })
+        phasesRoot.innerHTML = ''
+        addPhase()
+        form.elements.progressive.value = String(determineNextProgressive())
+        const today = new Date().toLocaleDateString('sv-SE')
+        form.elements.date.value = today
+        updateCounts(); updatePreview(); saveNow()
+        if (draftState) draftState.textContent = 'Editor azzerato'
+      }
+      manualEditor.querySelector('[data-reset-training-sheet]')?.addEventListener('click', resetEditor)
+
+      manualEditor.querySelector('[data-open-training-sheet]')?.addEventListener('change', (event) => {
+        const selected = calendarEvents.find((item) => item.id === event.target.value)
+        if (!selected) return
+        const savedKey = selected.trainingSheetPath ? `nz-training-sheet:${selected.trainingSheetPath}` : ''
+        const saved = selected.editorData ? JSON.stringify(selected.editorData) : (savedKey ? localStorage.getItem(savedKey) : null)
+        if (saved) {
+          localStorage.setItem(storageKey, saved)
+          restore()
+        } else {
+          form.elements.date.value = new Date(selected.startAt).toLocaleDateString('sv-SE')
+          form.elements.time.value = selected.time || '17:30'
+          form.elements.location.value = selected.place || 'Mezzolara'
+          form.elements.match_day.value = selected.matchDay || ''
+          form.elements.progressive.value = String(Number(selected.trainingSheetPath?.match(/(?:ALL|AL)[_-]?(\d{1,3})/i)?.[1] || determineNextProgressive()))
+          manualEditor.querySelectorAll('[data-md]').forEach((button) => button.classList.toggle('is-active', button.dataset.md === selected.matchDay))
+          updatePreview(); scheduleSave()
+        }
+        if (draftState) draftState.textContent = 'Training Sheet aperta'
+      })
+
       manualEditor.querySelector('[data-print-sheet]')?.addEventListener('click', createAndPublishPdf)
       restore()
       const nextProgressive = determineNextProgressive()
@@ -3291,6 +3350,7 @@ export async function attachAppEvents(user) {
         const sectionLabel = button.textContent.trim()
 
         setActiveNavigation(sectionKey)
+        localStorage.setItem('nz-active-section', sectionKey)
         await setView(sectionKey, sectionLabel)
         closeProfileMenu()
       })
@@ -3371,4 +3431,10 @@ export async function attachAppEvents(user) {
   })
 
   await bindDynamic()
+
+  const savedSection = localStorage.getItem('nz-active-section')
+  if (savedSection && savedSection !== 'dashboard' && menu.some(([key]) => key === savedSection)) {
+    setActiveNavigation(savedSection)
+    await setView(savedSection, menu.find(([key]) => key === savedSection)?.[1] || '')
+  }
 }

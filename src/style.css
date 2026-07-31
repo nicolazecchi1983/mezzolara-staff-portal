@@ -3931,3 +3931,10 @@ details[open] > summary > .library-chevron {
     background: var(--ts-navy) !important;
   }
 }
+
+/* V6.2.4 - Editor persistente, reset e rosa per reparti */
+.ts-editor-actions{display:flex;align-items:flex-end;justify-content:flex-end;gap:10px;flex-wrap:wrap}.ts-open-sheet{display:grid;gap:5px;min-width:250px}.ts-open-sheet span{font-size:.68rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--cyan)}.ts-open-sheet select,.ts-reset-button{height:42px;border:1px solid #214258;border-radius:11px;background:#071522;color:#dce8f1;padding:0 12px}.ts-reset-button{cursor:pointer;color:#ffbdc3;border-color:rgba(255,107,120,.45);font-weight:800}.ts-reset-button:hover{background:rgba(255,107,120,.1)}
+.ts-roster-department{display:grid;gap:2px;padding:5px 0 9px}.ts-roster-department+ .ts-roster-department{border-top:1px solid #173348}.ts-roster-department>strong{position:sticky;top:0;z-index:1;padding:8px 9px 6px;background:#071522;color:#58cdf8;font-size:.72rem;letter-spacing:.08em;text-transform:uppercase}
+.ts-load-grid{grid-template-columns:minmax(190px,1.25fr) minmax(150px,1fr) minmax(150px,1fr);gap:18px}.ts-load-grid .ts-choice-block{min-width:0}.ts-load-grid .ts-rating{width:100%}.ts-load-grid .ts-rating button{height:42px;font-size:.9rem}
+@media(max-width:1050px){.ts-editor-titlebar{align-items:flex-start}.ts-editor-actions{justify-content:flex-start;width:100%}.ts-open-sheet{flex:1 1 280px}}
+@media(max-width:720px){.ts-editor-actions{display:grid;grid-template-columns:1fr}.ts-open-sheet{min-width:0}.ts-reset-button,.ts-draft-state{width:100%}.ts-load-grid{grid-template-columns:1fr}}

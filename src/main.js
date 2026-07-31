@@ -82,7 +82,7 @@ async function showDashboard() {
 
   app.innerHTML = renderApp(user)
 
-  attachAppEvents(user)
+  await attachAppEvents(user)
 
   document
     .querySelector('#logoutButton')
