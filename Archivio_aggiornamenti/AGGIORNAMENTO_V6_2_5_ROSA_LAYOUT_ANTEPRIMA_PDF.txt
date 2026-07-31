@@ -1,0 +1,8 @@
+V6.2.5 — ROSA PER REPARTI, LAYOUT EDITOR E CONFERMA PDF
+
+1. Pagina Rosa suddivisa in Portieri, Difensori, Centrocampisti e Attaccanti.
+2. Giocatori ordinati alfabeticamente per cognome in ogni reparto.
+3. Eliminata la sovrapposizione tra form e anteprima con griglia fluida e passaggio anticipato a layout verticale.
+4. Crea PDF apre una vera anteprima del PDF generato.
+5. Il PDF viene scaricato e pubblicato soltanto dopo la conferma esplicita dell'amministratore.
+6. Annullando l'anteprima non viene salvato né caricato alcun file.

@@ -1,0 +1,12 @@
+NZ V6.3 PROFESSIONAL UX — VALIDATION REPORT
+
+[OK] reset_fix
+[OK] watermark
+[OK] player_profiles
+[OK] dashboard_next_match
+[OK] calendar_details
+[OK] mobile_readable
+[OK] edit_from_calendar
+[OK] JavaScript syntax checks
+[OK] Sensitive/generated folders excluded
+[NOTE] npm build not executable in container: Vite 8.1.5 unavailable in internal registry. Run npm install && npm run build locally.

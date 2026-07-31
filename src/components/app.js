@@ -12,6 +12,7 @@ let currentUser = null
 let currentUserProfile = null
 let staffProfiles = []
 let analysisEntries = []
+let playerProfiles = {}
 let currentCalendarDate = new Date()
 currentCalendarDate.setDate(1)
 
@@ -99,6 +100,29 @@ async function loadAnalysisEntries() {
   }
 
   analysisEntries = data ?? []
+}
+
+async function loadPlayerProfiles() {
+  const { data, error } = await supabase
+    .from('player_profiles')
+    .select('*')
+
+  if (error) {
+    console.warn('Schede giocatore non ancora collegate:', error.message)
+    playerProfiles = {}
+    return
+  }
+
+  playerProfiles = Object.fromEntries((data ?? []).map((profile) => [profile.player_key, profile]))
+}
+
+function playerKey(name = '') {
+  return String(name)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase('it-IT')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
 }
 
 async function loadStaffProfiles() {
@@ -322,102 +346,73 @@ function statCards() {
 }
 
 function dashboardView() {
-  const today = new Date()
-  const todayEvents = getTodayEvents()
-  const nextTraining = getNextTraining()
+  const now = new Date()
+  const today = startOfToday()
+  const day = (today.getDay() + 6) % 7
+  const weekStart = new Date(today)
+  weekStart.setDate(today.getDate() - day)
+  const weekEnd = new Date(weekStart)
+  weekEnd.setDate(weekStart.getDate() + 7)
+
+  const weekEvents = calendarEvents
+    .filter((event) => {
+      const date = new Date(event.startAt)
+      return date >= weekStart && date < weekEnd
+    })
+    .sort((a, b) => new Date(a.startAt) - new Date(b.startAt))
+
+  const weeklyTrainings = weekEvents.filter((event) => event.type === 'training')
+  const nextMatch = calendarEvents
+    .filter((event) => event.type === 'match' && new Date(event.startAt) >= now)
+    .sort((a, b) => new Date(a.startAt) - new Date(b.startAt))[0] ?? null
+
+  const weekDays = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(weekStart)
+    date.setDate(weekStart.getDate() + index)
+    const events = weekEvents.filter((event) => new Date(event.startAt).toDateString() === date.toDateString())
+    return { date, events }
+  })
 
   return `
-    <section class="view page-view">
+    <section class="view page-view dashboard-professional">
       <div class="page-head">
-        <div>
-          <h1>Dashboard</h1>
+        <div><h1>Dashboard</h1><p><span>STAGIONE 2026/27</span><b>•</b>Panoramica operativa</p></div>
+      </div>
 
-          <p>
-            <span>STAGIONE 2026/27</span>
-            <b>•</b>
-            Serie D
-          </p>
+      <div class="dashboard-primary-grid">
+        <article class="dashboard-feature-card dashboard-next-match">
+          <div class="dashboard-card-kicker">PROSSIMA PARTITA</div>
+          ${nextMatch ? `
+            <div class="dashboard-match-main"><span class="dashboard-match-date">${new Date(nextMatch.startAt).toLocaleDateString('it-IT',{weekday:'long',day:'numeric',month:'long'})}</span><strong>${nextMatch.time}</strong></div>
+            <h2>${escapeHtml(nextMatch.title || 'Partita')}</h2>
+            <p>${escapeHtml(nextMatch.place || 'Campo da definire')}</p>
+            <button class="wide-button" type="button" data-open-event="${nextMatch.id}">Apri partita</button>
+          ` : '<div class="dashboard-empty-state">Nessuna partita futura programmata.</div>'}
+        </article>
+
+        <article class="dashboard-feature-card">
+          <div class="dashboard-card-head"><div><span>ALLENAMENTI SETTIMANA</span><h2>${weeklyTrainings.length} sedute</h2></div><b>${weekStart.toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit'})}–${new Date(weekEnd-1).toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit'})}</b></div>
+          <div class="dashboard-training-history">
+            ${weeklyTrainings.length ? weeklyTrainings.map((event)=>`
+              <button type="button" data-open-event="${event.id}">
+                <span>${new Date(event.startAt).toLocaleDateString('it-IT',{weekday:'short',day:'numeric'})}</span>
+                <strong>${event.time} · ${escapeHtml(event.place || 'Campo da definire')}</strong>
+                <small>${event.matchDay || 'MD —'}${event.trainingSheetPath ? ' · TS pubblicata' : ' · TS assente'}</small>
+              </button>`).join('') : '<div class="dashboard-empty-state">Nessun allenamento nella settimana corrente.</div>'}
+          </div>
+        </article>
+      </div>
+
+      <article class="dashboard-week-card">
+        <div class="dashboard-card-head"><div><span>CALENDARIO SETTIMANALE</span><h2>${formatLongDate(today)}</h2></div><button type="button" class="ghost-button" data-dashboard-calendar>Apri calendario</button></div>
+        <div class="dashboard-week-grid">
+          ${weekDays.map(({date,events})=>`
+            <div class="dashboard-day ${date.toDateString()===today.toDateString()?'is-today':''}">
+              <header><span>${date.toLocaleDateString('it-IT',{weekday:'short'}).toUpperCase()}</span><strong>${date.getDate()}</strong></header>
+              <div>${events.length?events.map(event=>`<button type="button" data-open-event="${event.id}" class="is-${event.type}"><b>${event.time}</b><span>${escapeHtml(event.title)}</span><small>${event.matchDay || escapeHtml(event.place || '')}</small></button>`).join(''):'<em>—</em>'}</div>
+            </div>`).join('')}
         </div>
-      </div>
-
-      <div class="stats-grid">
-        ${statCards()}
-      </div>
-
-      <div class="dashboard-layout dashboard-layout--compact">
-        <article class="panel today-panel">
-          <div class="panel-head">
-            <div>
-              <span>OGGI</span>
-              <h2>${formatLongDate(today)}</h2>
-            </div>
-
-            <strong>${todayEvents.length} ${todayEvents.length === 1 ? 'attività' : 'attività'}</strong>
-          </div>
-
-          <div class="timeline">
-            ${todayEvents.length
-              ? todayEvents
-                  .map(
-                    (item) => `
-                      <div class="timeline-item">
-                        <time>${item.time}</time>
-                        <i class="${item.type}"></i>
-
-                        <div>
-                          <strong>${item.title}</strong>
-                          <span>${item.place || 'Luogo non indicato'}${item.type === 'training' && item.matchDay ? ` · ${item.matchDay}` : ''}</span>
-                        </div>
-                      </div>
-                    `,
-                  )
-                  .join('')
-              : `
-                  <div class="dashboard-empty-state">
-                    Nessuna attività programmata per oggi.
-                  </div>
-                `}
-          </div>
-        </article>
-
-        <article class="panel quick-panel">
-          <div class="panel-head">
-            <div>
-              <span>PROSSIMO ALLENAMENTO</span>
-              <h2>${nextTraining ? `${nextTraining.time} · ${nextTraining.place || 'Luogo non indicato'}` : 'Non programmato'}</h2>
-            </div>
-          </div>
-
-          <div class="training-summary">
-            <div>
-              <span>Data</span>
-              <strong>${nextTraining ? new Date(nextTraining.startAt).toLocaleDateString('it-IT') : '—'}</strong>
-            </div>
-
-            <div>
-              <span>Training Sheet</span>
-              <strong>${nextTraining?.trainingSheetPath ? 'Presente' : '—'}</strong>
-            </div>
-
-            <div>
-              <span>MD</span>
-              <strong>${nextTraining?.matchDay || 'Nessuno'}</strong>
-            </div>
-          </div>
-
-          ${nextTraining
-            ? `
-                <button
-                  class="wide-button"
-                  type="button"
-                  data-open-event="${nextTraining.id}"
-                >
-                  Apri allenamento
-                </button>
-              `
-            : ''}
-        </article>
-      </div>
+      </article>
     </section>
   `
 }
@@ -491,9 +486,8 @@ function calendarCells() {
                     ${event.title}
                   </strong>
 
-                  <span>
-                    ${event.time}${eventPlaceLabel(event)}${event.type === 'training' && event.matchDay ? ` · ${event.matchDay}` : ''}
-                  </span>
+                  <span>${event.time}${eventPlaceLabel(event)}</span>
+                  ${event.type === 'training' ? `<small class="calendar-event-details">${event.matchDay || 'MD —'}${event.editorData?.focus ? ` · ${escapeHtml(event.editorData.focus)}` : ''}${event.trainingSheetPath ? ' · TS' : ''}</small>` : ''}
                 </button>
               `,
             )
@@ -589,56 +583,64 @@ function calendarView() {
 }
 
 function squadView() {
+  const roleOrder = ['Portiere', 'Difensore', 'Centrocampista', 'Attaccante']
+  const roleLabels = {
+    Portiere: 'Portieri',
+    Difensore: 'Difensori',
+    Centrocampista: 'Centrocampisti',
+    Attaccante: 'Attaccanti',
+  }
+  const activePlayers = players.filter((player) => player.name !== 'Andrea Giovannini')
+
+  const groupedPlayers = roleOrder.map((role) => ({
+    role,
+    label: roleLabels[role],
+    players: activePlayers
+      .filter((player) => player.role === role)
+      .sort((a, b) => {
+        const surnameA = String(a.name).trim().split(/\s+/).pop() || ''
+        const surnameB = String(b.name).trim().split(/\s+/).pop() || ''
+        return surnameA.localeCompare(surnameB, 'it', { sensitivity: 'base' })
+      }),
+  })).filter((group) => group.players.length)
+
   return `
     <section class="view page-view">
       <div class="page-head">
         <div>
           <h1>Rosa</h1>
-
-          <p>
-            <span>27 GIOCATORI</span>
-            <b>•</b>
-            Serie D
-          </p>
+          <p><span>${activePlayers.length} GIOCATORI</span><b>•</b>Serie D</p>
         </div>
-
-        <button class="primary-action" type="button">
-          ${icon('plus')}
-          Nuovo giocatore
-        </button>
+        <button class="primary-action" type="button">${icon('plus')}Nuovo giocatore</button>
       </div>
 
-      <div class="players-grid">
-        ${players
-          .map(
-            (player) => `
-              <article class="player-card">
-                <div class="player-avatar">
-                  ${player.initials}
-                </div>
-
-                <div class="player-main">
-                  <h3>${player.name}</h3>
-                  <p>${player.year} · ${player.role}</p>
-                </div>
-
-                <div class="player-meta">
-                  <span>Piede ${player.foot}</span>
-
-                  <strong
-                    class="${
-                      player.status === 'Disponibile'
-                        ? 'ok'
-                        : 'warn'
-                    }"
-                  >
-                    ${player.status}
-                  </strong>
-                </div>
-              </article>
-            `,
-          )
-          .join('')}
+      <div class="squad-departments">
+        ${groupedPlayers.map((group) => `
+          <section class="squad-department">
+            <div class="squad-department-head">
+              <div>
+                <span>${icon('squad')}</span>
+                <h2>${group.label}</h2>
+              </div>
+              <b>${group.players.length}</b>
+            </div>
+            <div class="players-grid">
+              ${group.players.map((player) => `
+                <button class="player-card player-card--button" type="button" data-player-profile="${playerKey(player.name)}">
+                  <div class="player-avatar">${player.initials}</div>
+                  <div class="player-main">
+                    <h3>${player.name}</h3>
+                    <p>${player.year} · ${player.role}</p>
+                  </div>
+                  <div class="player-meta">
+                    <span>Piede ${player.foot}</span>
+                    <strong class="${player.status === 'Disponibile' ? 'ok' : 'warn'}">${player.status}</strong>
+                  </div>
+                </button>
+              `).join('')}
+            </div>
+          </section>
+        `).join('')}
       </div>
     </section>
   `
@@ -1330,6 +1332,51 @@ function trainingSheetPreviewHtml(event) {
   `
 }
 
+function trainingSheetStructuredHtml(event) {
+  const data = event.editorData
+  if (!data) return ''
+  const phases = Array.isArray(data.phases) ? data.phases : []
+  return `
+    <section class="drawer-ts-readable">
+      <div class="drawer-ts-summary">
+        <span><small>Codice</small><b>ALL_${String(data.progressive || '---').padStart(3,'0')}</b></span>
+        <span><small>Focus</small><b>${escapeHtml(data.focus || '—')}</b></span>
+        <span><small>Presenti</small><b>${escapeHtml(data.present ?? event.presentCount ?? '—')}</b></span>
+      </div>
+      ${data.pillars?.length ? `<div class="drawer-ts-pillars">${data.pillars.map((pillar)=>`<span>${escapeHtml(pillar)}</span>`).join('')}</div>` : ''}
+      <div class="drawer-ts-text"><small>OBIETTIVO</small><p>${escapeHtml(data.objective || 'Da definire')}</p></div>
+      <div class="drawer-ts-text"><small>PRINCIPI</small><p>${escapeHtml(data.principles || 'Da definire')}</p></div>
+      <div class="drawer-ts-phases">${phases.map((phase,index)=>`<article><header><b>FASE ${index+1}</b><span>${escapeHtml(phase.duration || '—')}'</span></header><strong>${escapeHtml(phase.title || 'Senza titolo')}</strong><p>${escapeHtml(phase.description || '')}</p><small>Portieri: ${phase.goalkeepers==='yes'?'Sì':phase.goalkeepers==='separate'?'Separati':'No'}</small></article>`).join('')}</div>
+    </section>`
+}
+
+function playerProfileModalHtml(player) {
+  const key = playerKey(player.name)
+  const saved = playerProfiles[key] || {}
+  return `
+    <div class="new-event-modal-backdrop player-profile-backdrop" data-close-player-profile>
+      <section class="new-event-modal player-profile-modal" role="dialog" aria-modal="true" aria-labelledby="playerProfileTitle">
+        <div class="new-event-modal__head"><div><span>SCHEDA GIOCATORE</span><h2 id="playerProfileTitle">${escapeHtml(player.name)}</h2></div><button type="button" class="new-event-modal__close" data-close-player-profile>${icon('close')}</button></div>
+        <form class="player-profile-form" data-player-profile-form data-player-key="${key}">
+          <div class="player-profile-grid">
+            <label class="form-field"><span>Nome e cognome</span><input name="full_name" value="${escapeHtml(saved.full_name || player.name)}" required></label>
+            <label class="form-field"><span>Ruolo</span><select name="role">${['Portiere','Difensore','Centrocampista','Attaccante'].map(role=>`<option ${role===(saved.role||player.role)?'selected':''}>${role}</option>`).join('')}</select></label>
+            <label class="form-field"><span>Anno di nascita</span><input name="birth_year" inputmode="numeric" value="${escapeHtml(saved.birth_year || player.year || '')}"></label>
+            <label class="form-field"><span>Piede preferito</span><select name="preferred_foot"><option value="">Da definire</option><option value="DX" ${(saved.preferred_foot||player.foot)==='DX'?'selected':''}>Destro</option><option value="SX" ${(saved.preferred_foot||player.foot)==='SX'?'selected':''}>Sinistro</option><option value="AMB" ${saved.preferred_foot==='AMB'?'selected':''}>Ambidestro</option></select></label>
+            <label class="form-field"><span>Altezza (cm)</span><input name="height_cm" type="number" min="120" max="230" value="${escapeHtml(saved.height_cm || '')}"></label>
+            <label class="form-field"><span>Peso (kg)</span><input name="weight_kg" type="number" min="35" max="180" step="0.1" value="${escapeHtml(saved.weight_kg || '')}"></label>
+            <label class="form-field"><span>Telefono</span><input name="phone" type="tel" value="${escapeHtml(saved.phone || '')}"></label>
+            <label class="form-field"><span>Email</span><input name="email" type="email" value="${escapeHtml(saved.email || '')}"></label>
+          </div>
+          <label class="form-field"><span>Note tecniche</span><textarea name="technical_notes" rows="4">${escapeHtml(saved.technical_notes || '')}</textarea></label>
+          <label class="form-field"><span>Note infortuni</span><textarea name="injury_notes" rows="3">${escapeHtml(saved.injury_notes || '')}</textarea></label>
+          <p class="form-message" data-player-profile-message></p>
+          <div class="modal-actions"><button type="button" class="ghost-button" data-close-player-profile>Annulla</button><button type="submit" class="primary-action">Salva scheda</button></div>
+        </form>
+      </section>
+    </div>`
+}
+
 function drawerHtml(event) {
   const eventDate = new Date(event.startAt)
   const formattedDate = new Intl.DateTimeFormat('it-IT', {
@@ -1392,23 +1439,16 @@ function drawerHtml(event) {
                 <div><span>Presenti</span><strong>${event.presentCount ?? '—'}${event.squadTotal ? `/${event.squadTotal}` : ''}</strong></div>
               </div>
 
+              ${trainingSheetStructuredHtml(event)}
               <div class="training-sheet-preview-wrap">
                 ${trainingSheetPreviewHtml(event)}
               </div>
 
-              ${event.trainingSheetUrl && isOwner()
-                ? `
-                    <a
-                      class="wide-button drawer-sheet-link"
-                      href="${event.trainingSheetUrl}"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      <span class="drawer-sheet-link__icon">${icon('sheet')}</span>
-                      <span>Apri Training Sheet</span>
-                    </a>
-                  `
-                : ''}
+              ${isOwner() ? `
+                <div class="drawer-ts-owner-actions">
+                  ${event.editorData ? `<button class="wide-button" type="button" data-edit-training-sheet="${event.id}">${icon('sheet')} Modifica nel TS Editor</button>` : ''}
+                  ${event.trainingSheetUrl ? `<a class="wide-button drawer-sheet-link" href="${event.trainingSheetUrl}" target="_blank" rel="noopener noreferrer"><span class="drawer-sheet-link__icon">${icon('sheet')}</span><span>Apri PDF</span></a>` : ''}
+                </div>` : ''}
             </div>
           `
         : ''}
@@ -1895,6 +1935,7 @@ export async function attachAppEvents(user) {
   await loadCurrentUserRole(user)
   syncProfileHeader()
   await loadCalendarEvents()
+  await loadPlayerProfiles()
   
   const root = document.querySelector('#viewRoot')
   const drawerRoot = document.querySelector('#drawerRoot')
@@ -1936,6 +1977,10 @@ export async function attachAppEvents(user) {
 
   if (key === 'analysis') {
     await loadAnalysisEntries()
+  }
+
+  if (key === 'squad') {
+    await loadPlayerProfiles()
   }
 
   const views = {
@@ -2425,6 +2470,17 @@ export async function attachAppEvents(user) {
       ?.addEventListener('click', async () => {
         await deleteEvent(event.id)
       })
+
+    drawerRoot
+      .querySelector('[data-edit-training-sheet]')
+      ?.addEventListener('click', async () => {
+        if (!event.editorData) return
+        localStorage.setItem('nz-training-sheet-editor-v6-2', JSON.stringify(event.editorData))
+        localStorage.setItem('nz-active-section', 'training-sheet')
+        closeDrawer()
+        setActiveNavigation('training-sheet')
+        await setView('training-sheet', 'Training Sheet Editor')
+      })
   }
 
   function closeDrawer() {
@@ -2548,6 +2604,8 @@ export async function attachAppEvents(user) {
         const formattedDate = d.date ? new Date(`${d.date}T12:00:00`).toLocaleDateString('it-IT') : '—'
         const total = d.phases.reduce((sum,p)=>sum+(Number(p.duration)||0),0)
         preview.innerHTML = `
+          <div class="ts-watermark" aria-hidden="true"><b>NZ</b><div>${Array.from({length:8},()=>'<span>NICOLA ZECCHI · NICOLA ZECCHI · NICOLA ZECCHI</span>').join('')}</div></div>
+          <div class="ts-paper-content">
           <header class="ts-paper-head"><div class="ts-paper-brand"><img src="/mezzolara-logo.png" alt="Mezzolara Calcio"><div><strong>MEZZOLARA CALCIO</strong><span>TRAINING SHEET</span></div></div><div class="ts-paper-title"><small>ALLENATORE · NICOLA ZECCHI</small><strong>ALL_${String(d.progressive || '---').padStart(3,'0')}</strong></div></header>
           <div class="ts-paper-meta"><span><small>Data</small><b>${escape(formattedDate)}</b></span><span><small>Ora</small><b>${escape(d.time || '—')}</b></span><span><small>Campo</small><b>${escape(d.location || '—')}</b></span><span><small>Presenti</small><b>${escape(d.present || '—')}</b></span><span class="ts-paper-md ts-md-${escape((d.match_day || 'none').replace('+','plus').replace('-','minus').toLowerCase())}">${escape(d.match_day || 'MD —')}</span></div>
           <div class="ts-paper-load"><span><small>Focus fisico</small><b>${escape(d.focus || '—')}</b></span><span><small>Intensità</small>${bar(d.intensity)}</span><span><small>Volume</small>${bar(d.volume)}</span><span><small>Durata</small><b>${total || '—'}'</b></span></div>
@@ -2555,6 +2613,7 @@ export async function attachAppEvents(user) {
           <section class="ts-paper-roster"><div><small>ASSENTI</small><p>${d.absent.length?d.absent.map(n=>`<span>${escape(n)}</span>`).join(''):'<em>Nessuno</em>'}</p></div><div class="inj"><small>INFORTUNATI</small><p>${d.injured.length?d.injured.map(n=>`<span>${escape(n)}</span>`).join(''):'<em>Nessuno</em>'}</p></div></section>
           <section class="ts-paper-objectives"><div><small>OBIETTIVO</small><p>${escape(d.objective || 'Da definire')}</p></div><div><small>PRINCIPI</small><p>${escape(d.principles || 'Da definire')}</p></div></section>
           <section class="ts-paper-body"><div class="ts-paper-phases">${d.phases.length ? d.phases.map((p,i)=>`<article><div><b>${String(i+1).padStart(2,'0')}</b><strong>FASE ${i+1}${p.title?` · ${escape(p.title)}`:''}</strong><span class="ts-phase-gk">Portieri: ${p.goalkeepers==='yes'?'Sì':p.goalkeepers==='separate'?'Separati':'No'}</span><span>${escape(p.duration || '—')}'</span></div><p>${escape(p.description || 'Descrizione da completare')}</p>${p.variants?`<small><b>Varianti:</b> ${escape(p.variants)}</small>`:''}${p.coaching?`<small><b>Coaching point:</b> ${escape(p.coaching)}</small>`:''}</article>`).join('') : '<p class="ts-paper-empty">Aggiungi la prima fase.</p>'}</div></section>
+          </div>
         `
       }
 
@@ -2568,16 +2627,25 @@ export async function attachAppEvents(user) {
       }
       const restore = () => {
         const raw = localStorage.getItem(storageKey)
-        if (!raw) { addPhase(); return }
+        phasesRoot.innerHTML = ''
+        phaseCount = 0
+        form.querySelectorAll('[name="pillars"]').forEach((input) => { input.checked = false })
+        manualEditor.querySelectorAll('[data-player-select] input').forEach((input) => { input.checked = false })
+        if (!raw) { addPhase(); updateCounts(); updatePreview(); return }
         try {
-          const d=JSON.parse(raw)
-          Object.entries(d).forEach(([key,value])=>{ const field=form.elements.namedItem(key); if(field && !Array.isArray(value)) field.value=value ?? '' })
+          const d = JSON.parse(raw)
+          Object.entries(d).forEach(([key,value]) => { const field=form.elements.namedItem(key); if(field && !Array.isArray(value)) field.value=value ?? '' })
           d.phases?.length ? d.phases.forEach(addPhase) : addPhase()
-          d.pillars?.forEach(v=>{ const el=[...form.querySelectorAll('[name="pillars"]')].find(i=>i.value===v); if(el) el.checked=true })
-          ;['absent','injured'].forEach(type=>d[type]?.forEach(v=>{ const el=[...manualEditor.querySelectorAll(`[data-player-select="${type}"] input`)].find(i=>i.value===v); if(el) el.checked=true }))
-          manualEditor.querySelectorAll('[data-md]').forEach(b=>b.classList.toggle('is-active',b.dataset.md===d.match_day))
-          manualEditor.querySelectorAll('[data-rating]').forEach(group=>group.querySelectorAll('button').forEach(b=>b.classList.toggle('is-active',Number(b.dataset.value)<=Number(d[group.dataset.rating]||0))))
-        } catch { addPhase() }
+          d.pillars?.forEach((value) => { const el=[...form.querySelectorAll('[name="pillars"]')].find((input)=>input.value===value); if(el) el.checked=true })
+          const normalize = (value='') => String(value).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('it-IT').replace(/[^a-z0-9]/g,'')
+          ;['absent','injured'].forEach((type) => d[type]?.forEach((value) => {
+            const el=[...manualEditor.querySelectorAll(`[data-player-select="${type}"] input`)].find((input)=>normalize(input.value)===normalize(value) || normalize(input.dataset.canonicalName)===normalize(value))
+            if(el) el.checked=true
+          }))
+          manualEditor.querySelectorAll('[data-md]').forEach((button)=>button.classList.toggle('is-active',button.dataset.md===d.match_day))
+          manualEditor.querySelectorAll('[data-rating]').forEach((group)=>group.querySelectorAll('button').forEach((button)=>button.classList.toggle('is-active',Number(button.dataset.value)<=Number(d[group.dataset.rating]||0))))
+          updateCounts(); updatePreview()
+        } catch (error) { console.warn('Bozza TS non leggibile:', error); addPhase(); updateCounts(); updatePreview() }
       }
       const updateCounts = () => {
         manualEditor.querySelectorAll('[data-player-select]').forEach(box=>{
@@ -2623,6 +2691,33 @@ export async function attachAppEvents(user) {
         const storedNext = Number(localStorage.getItem('nz-training-sheet-next-progressive') || 0)
         return Math.max(1, storedNext, ...fromPaths.map((value) => value + 1))
       }
+      const confirmPdfPreview = (blob, fileName) => new Promise((resolve) => {
+        const objectUrl = URL.createObjectURL(blob)
+        const overlay = document.createElement('div')
+        overlay.className = 'ts-pdf-confirm-overlay'
+        overlay.innerHTML = `
+          <section class="ts-pdf-confirm-dialog" role="dialog" aria-modal="true" aria-label="Anteprima PDF">
+            <header>
+              <div><span>ANTEPRIMA DI STAMPA</span><strong>${tsEscapeHtml(fileName)}</strong></div>
+              <button type="button" data-pdf-cancel aria-label="Chiudi">×</button>
+            </header>
+            <iframe title="Anteprima PDF" src="${objectUrl}#toolbar=1&navpanes=0&view=FitH"></iframe>
+            <footer>
+              <button type="button" class="secondary" data-pdf-cancel>Annulla</button>
+              <button type="button" class="primary" data-pdf-confirm>Conferma e salva PDF</button>
+            </footer>
+          </section>`
+        document.body.appendChild(overlay)
+        const finish = (confirmed) => {
+          URL.revokeObjectURL(objectUrl)
+          overlay.remove()
+          resolve(confirmed)
+        }
+        overlay.querySelectorAll('[data-pdf-cancel]').forEach((button) => button.addEventListener('click', () => finish(false)))
+        overlay.querySelector('[data-pdf-confirm]')?.addEventListener('click', () => finish(true))
+        overlay.addEventListener('click', (event) => { if (event.target === overlay) finish(false) })
+      })
+
       const createAndPublishPdf = async () => {
         const button = manualEditor.querySelector('[data-print-sheet]')
         const note = manualEditor.querySelector('[data-publish-note]')
@@ -2665,6 +2760,14 @@ export async function attachAppEvents(user) {
           const safeDate = d.date.replaceAll('-', '')
           const fileName = `ALL_${progressive}_${safeDate}.pdf`
           const filePath = `${d.date}/${fileName}`
+
+          if (note) note.textContent = 'Controlla l’anteprima e conferma il salvataggio.'
+          const confirmed = await confirmPdfPreview(blob, fileName)
+          if (!confirmed) {
+            if (note) note.textContent = 'Creazione PDF annullata. Nessun file è stato salvato.'
+            return
+          }
+          if (note) note.textContent = 'Salvataggio e collegamento al Calendario…'
 
           const existingEvent = calendarEvents.find((event) => {
             if (!isTrainingEventType(event.type)) return false
@@ -2724,7 +2827,7 @@ export async function attachAppEvents(user) {
         form.elements.progressive.value = String(determineNextProgressive())
         const today = new Date().toLocaleDateString('sv-SE')
         form.elements.date.value = today
-        updateCounts(); updatePreview(); saveNow()
+        updateCounts(); updatePreview(); saveDraft()
         if (draftState) draftState.textContent = 'Editor azzerato'
       }
       manualEditor.querySelector('[data-reset-training-sheet]')?.addEventListener('click', resetEditor)
@@ -3311,6 +3414,68 @@ export async function attachAppEvents(user) {
     })
 
     await restoreLatestTsDraft()
+
+    root.querySelectorAll('[data-player-profile]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const player = players.find((item) => playerKey(item.name) === button.dataset.playerProfile)
+        if (!player || !modalRoot) return
+        modalRoot.innerHTML = playerProfileModalHtml(player)
+        document.body.classList.add('new-event-modal-open')
+
+        const closeProfile = () => {
+          modalRoot.innerHTML = ''
+          document.body.classList.remove('new-event-modal-open')
+        }
+
+        modalRoot.querySelectorAll('[data-close-player-profile]').forEach((element) => {
+          element.addEventListener('click', (event) => {
+            if (element.classList.contains('player-profile-backdrop') && event.target !== element) return
+            closeProfile()
+          })
+        })
+
+        modalRoot.querySelector('[data-player-profile-form]')?.addEventListener('submit', async (event) => {
+          event.preventDefault()
+          const profileForm = event.currentTarget
+          const message = profileForm.querySelector('[data-player-profile-message]')
+          const values = Object.fromEntries(new FormData(profileForm).entries())
+          const numberOrNull = (value) => value === '' ? null : Number(value)
+          const payload = {
+            player_key: profileForm.dataset.playerKey,
+            full_name: String(values.full_name || '').trim(),
+            role: values.role,
+            birth_year: values.birth_year || null,
+            preferred_foot: values.preferred_foot || null,
+            height_cm: numberOrNull(values.height_cm),
+            weight_kg: numberOrNull(values.weight_kg),
+            phone: values.phone || null,
+            email: values.email || null,
+            technical_notes: values.technical_notes || null,
+            injury_notes: values.injury_notes || null,
+            updated_at: new Date().toISOString(),
+          }
+          const { data: saved, error } = await supabase
+            .from('player_profiles')
+            .upsert(payload, { onConflict: 'player_key' })
+            .select()
+            .single()
+          if (error) {
+            message.textContent = `Errore: ${error.message}`
+            message.className = 'form-message is-error'
+            return
+          }
+          playerProfiles[payload.player_key] = saved
+          message.textContent = 'Scheda salvata correttamente.'
+          message.className = 'form-message is-success'
+        })
+      })
+    })
+
+    root.querySelector('[data-dashboard-calendar]')?.addEventListener('click', async () => {
+      setActiveNavigation('calendar')
+      localStorage.setItem('nz-active-section', 'calendar')
+      await setView('calendar', 'Calendario')
+    })
 
     root.querySelector('[data-library-search]')?.addEventListener('input', (event) => {
       const query = event.currentTarget.value.trim().toLocaleLowerCase('it-IT')
