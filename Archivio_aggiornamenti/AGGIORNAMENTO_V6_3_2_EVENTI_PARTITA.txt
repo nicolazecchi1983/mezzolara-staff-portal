@@ -1,0 +1,10 @@
+NZ V6.3.2 — Eventi partita e form calendario
+
+- Corretto il salvataggio delle partite senza dipendere dal campo notes.
+- Aggiunto il campo obbligatorio Avversario.
+- Rimosso Presenti/Totale rosa dal form del Calendario.
+- Tipo partita e Avversario compaiono solo quando Tipo evento = Partita.
+- MD e Training Sheet compaiono solo quando Tipo evento = Allenamento.
+- Uniformata l’altezza di input e menu a tendina.
+- Titolo evento strutturato: Partita · Tipo · vs Avversario.
+- Aggiunta migrazione SQL per il campo notes, necessario al salvataggio completo delle TS.

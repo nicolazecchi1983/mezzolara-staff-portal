@@ -1,0 +1,16 @@
+VALIDAZIONE V6.3.1
+
+[OK] app.js parse JavaScript
+[OK] main.js parse JavaScript
+[OK] icons.js parse JavaScript
+[OK] CSS braces balanced
+[OK] no .env
+[OK] no .git
+[OK] no node_modules
+[OK] no dist
+[OK] match type field present in create and edit event
+[OK] mobile TS preview fit logic present
+[OK] dashboard 7-day mobile compact layout present
+[OK] player profile notes layout balanced
+
+Build locale/container: non eseguita per vite 8.1.5 non disponibile nel registry interno.

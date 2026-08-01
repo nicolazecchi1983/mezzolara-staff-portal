@@ -186,6 +186,11 @@ async function loadCalendarEvents() {
         }
       }
 
+      const parsedNotes = (() => {
+        try { return JSON.parse(event.notes || '{}') } catch { return {} }
+      })()
+      const titleMatchData = parseMatchTitle(event.title)
+
       return {
         id: event.id,
         day: new Date(event.start_at).getDate(),
@@ -202,7 +207,10 @@ async function loadCalendarEvents() {
         squadTotal: event.squad_total ?? null,
         trainingSheetPath,
         trainingSheetUrl,
-        editorData: (() => { try { const parsed = JSON.parse(event.notes || '{}'); return parsed?.type === 'training_sheet_editor' ? parsed.data : null } catch { return null } })(),
+        editorData: parsedNotes?.type === 'training_sheet_editor' ? parsedNotes.data : null,
+        matchType: event.match_type || (parsedNotes?.type === 'match_event' ? parsedNotes.match_type || null : null) || titleMatchData.matchType,
+        opponent: event.opponent || (parsedNotes?.type === 'match_event' ? parsedNotes.opponent || '' : '') || titleMatchData.opponent,
+        rawNotes: event.notes || null,
       }
     }),
   )
@@ -362,9 +370,18 @@ function dashboardView() {
     .sort((a, b) => new Date(a.startAt) - new Date(b.startAt))
 
   const weeklyTrainings = weekEvents.filter((event) => event.type === 'training')
-  const nextMatch = calendarEvents
+  const nextMatches = calendarEvents
     .filter((event) => event.type === 'match' && new Date(event.startAt) >= now)
-    .sort((a, b) => new Date(a.startAt) - new Date(b.startAt))[0] ?? null
+    .sort((a, b) => new Date(a.startAt) - new Date(b.startAt))
+    .slice(0, 3)
+
+  const dayDiff = (from, to) => {
+    const start = new Date(from)
+    const end = new Date(to)
+    start.setHours(0, 0, 0, 0)
+    end.setHours(0, 0, 0, 0)
+    return Math.max(0, Math.round((end - start) / 86400000))
+  }
 
   const weekDays = Array.from({ length: 7 }, (_, index) => {
     const date = new Date(weekStart)
@@ -381,12 +398,26 @@ function dashboardView() {
 
       <div class="dashboard-primary-grid">
         <article class="dashboard-feature-card dashboard-next-match">
-          <div class="dashboard-card-kicker">PROSSIMA PARTITA</div>
-          ${nextMatch ? `
-            <div class="dashboard-match-main"><span class="dashboard-match-date">${new Date(nextMatch.startAt).toLocaleDateString('it-IT',{weekday:'long',day:'numeric',month:'long'})}</span><strong>${nextMatch.time}</strong></div>
-            <h2>${escapeHtml(nextMatch.title || 'Partita')}</h2>
-            <p>${escapeHtml(nextMatch.place || 'Campo da definire')}</p>
-            <button class="wide-button" type="button" data-open-event="${nextMatch.id}">Apri partita</button>
+          <div class="dashboard-card-kicker">PROSSIME PARTITE</div>
+          ${nextMatches.length ? `
+            <div class="dashboard-match-list">
+              ${nextMatches.map((match, index) => {
+                const previous = index === 0 ? today : new Date(nextMatches[index - 1].startAt)
+                const distance = dayDiff(previous, new Date(match.startAt))
+                const distanceLabel = index === 0
+                  ? (distance === 0 ? 'Oggi' : distance === 1 ? 'Domani' : `Tra ${distance} giorni`)
+                  : (distance === 1 ? '1 giorno dalla precedente' : `${distance} giorni dalla precedente`)
+                return `
+                  <article class="dashboard-match-item">
+                    <button type="button" data-open-event="${match.id}" aria-label="Apri ${escapeHtml(match.title || 'partita')}">
+                      <div class="dashboard-match-main"><span class="dashboard-match-date">${new Date(match.startAt).toLocaleDateString('it-IT',{weekday:'long',day:'numeric',month:'long'})}</span><strong>${match.time}</strong></div>
+                      <h2>${escapeHtml(match.title || 'Partita')}</h2>
+                      <p>${match.matchType ? `<span class="match-kind match-kind--${escapeHtml(match.matchType)}">${escapeHtml(matchTypeLabel(match.matchType))}</span>` : ''}${escapeHtml(match.place || 'Campo da definire')}</p>
+                      <small class="dashboard-match-distance">${distanceLabel}</small>
+                    </button>
+                  </article>`
+              }).join('')}
+            </div>
           ` : '<div class="dashboard-empty-state">Nessuna partita futura programmata.</div>'}
         </article>
 
@@ -409,7 +440,7 @@ function dashboardView() {
           ${weekDays.map(({date,events})=>`
             <div class="dashboard-day ${date.toDateString()===today.toDateString()?'is-today':''}">
               <header><span>${date.toLocaleDateString('it-IT',{weekday:'short'}).toUpperCase()}</span><strong>${date.getDate()}</strong></header>
-              <div>${events.length?events.map(event=>`<button type="button" data-open-event="${event.id}" class="is-${event.type}"><b>${event.time}</b><span>${escapeHtml(event.title)}</span><small>${event.matchDay || escapeHtml(event.place || '')}</small></button>`).join(''):'<em>—</em>'}</div>
+              <div>${events.length?events.map(event=>`<button type="button" data-open-event="${event.id}" class="is-${event.type} ${event.type === 'match' && event.matchType ? `is-match-${event.matchType}` : ''}"><b>${event.time}</b><span>${escapeHtml(event.title)}</span><small>${event.matchDay || escapeHtml(event.place || '')}</small></button>`).join(''):'<em>—</em>'}</div>
             </div>`).join('')}
         </div>
       </article>
@@ -426,6 +457,32 @@ function eventTypeIcon(type) {
   }
 
   return icon(icons[type] ?? 'calendar')
+}
+
+function matchTypeLabel(value) {
+  return ({ friendly: 'Amichevole', cup: 'Coppa', league: 'Campionato' })[value] || 'Partita'
+}
+
+function matchTypeValueFromLabel(value = '') {
+  const normalized = String(value).trim().toLowerCase()
+  return ({ amichevole: 'friendly', coppa: 'cup', campionato: 'league' })[normalized] || null
+}
+
+function parseMatchTitle(title = '') {
+  const parts = String(title).split('·').map((part) => part.trim()).filter(Boolean)
+  if (!/^partita$/i.test(parts[0] || '')) return { matchType: null, opponent: '' }
+  const matchType = matchTypeValueFromLabel(parts[1] || '')
+  const opponent = String(parts[2] || '').replace(/^vs\s+/i, '').trim()
+  return { matchType, opponent }
+}
+
+function buildEventTitle(eventType, matchType, opponent) {
+  if (eventType !== 'match') {
+    return ({ training: 'Allenamento', meeting: 'Riunione', rest: 'Riposo' })[eventType] || 'Evento'
+  }
+  const parts = ['Partita', matchTypeLabel(matchType)]
+  parts.push(`vs ${String(opponent || 'Da definire').trim() || 'Da definire'}`)
+  return parts.join(' · ')
 }
 
 function eventPlaceLabel(event) {
@@ -475,7 +532,7 @@ function calendarCells() {
             .map(
               (event) => `
                 <button
-                  class="calendar-event calendar-event--${event.type}"
+                  class="calendar-event calendar-event--${event.type} ${event.type === 'match' && event.matchType ? `calendar-event--match-${event.matchType}` : ''}"
                   data-open-event="${event.id}"
                   type="button"
                 >
@@ -488,6 +545,7 @@ function calendarCells() {
 
                   <span>${event.time}${eventPlaceLabel(event)}</span>
                   ${event.type === 'training' ? `<small class="calendar-event-details">${event.matchDay || 'MD —'}${event.editorData?.focus ? ` · ${escapeHtml(event.editorData.focus)}` : ''}${event.trainingSheetPath ? ' · TS' : ''}</small>` : ''}
+                  ${event.type === 'match' && event.matchType ? `<small class="calendar-event-details">${escapeHtml(matchTypeLabel(event.matchType))}</small>` : ''}
                 </button>
               `,
             )
@@ -1027,10 +1085,11 @@ function trainingSheetEditorView() {
         <form class="ts-manual-form" data-ts-manual-form>
           <section class="ts-form-card">
             <div class="ts-card-head"><span>01</span><div><h2>Dati seduta</h2><p>Informazioni principali della sessione.</p></div></div>
-            <div class="ts-fields-grid">
+            <div class="ts-fields-grid ts-session-grid">
               <label class="ts-field"><span>Data</span><div class="ts-input-icon"><i>${icon('calendar')}</i><input name="date" type="date" required></div></label>
               <label class="ts-field"><span>Orario</span><div class="ts-input-icon"><i>${icon('clock')}</i><input name="time" type="time" value="17:30" required></div></label>
-              <label class="ts-field"><span>Campo</span><select name="location"><option>Mezzolara</option><option>Budrio</option><option>Altro</option></select></label>
+              <label class="ts-field ts-field--location"><span>Campo</span><select name="location"><option>Mezzolara</option><option>Budrio</option><option value="__custom__">Altro campo…</option></select></label>
+              <label class="ts-field ts-custom-location" data-ts-custom-location hidden><span>Nome campo / impianto</span><input name="custom_location" type="text" maxlength="100" autocomplete="off" placeholder="Scrivi il nome del campo"></label>
               <label class="ts-field"><span>Allenamento n°</span><input name="progressive" type="number" min="1" value="1"><small class="ts-field-help">Proposto automaticamente, modificabile</small></label>
               <label class="ts-field"><span>Presenti</span><input name="present" type="number" min="0" value="28" readonly aria-readonly="true"><small class="ts-field-help">Calcolati automaticamente dalla Rosa</small></label>
             </div>
@@ -1368,8 +1427,10 @@ function playerProfileModalHtml(player) {
             <label class="form-field"><span>Telefono</span><input name="phone" type="tel" value="${escapeHtml(saved.phone || '')}"></label>
             <label class="form-field"><span>Email</span><input name="email" type="email" value="${escapeHtml(saved.email || '')}"></label>
           </div>
-          <label class="form-field"><span>Note tecniche</span><textarea name="technical_notes" rows="4">${escapeHtml(saved.technical_notes || '')}</textarea></label>
-          <label class="form-field"><span>Note infortuni</span><textarea name="injury_notes" rows="3">${escapeHtml(saved.injury_notes || '')}</textarea></label>
+          <div class="player-profile-notes-grid">
+            <label class="form-field"><span>Note tecniche</span><textarea name="technical_notes" rows="4">${escapeHtml(saved.technical_notes || '')}</textarea></label>
+            <label class="form-field"><span>Note infortuni</span><textarea name="injury_notes" rows="4">${escapeHtml(saved.injury_notes || '')}</textarea></label>
+          </div>
           <p class="form-message" data-player-profile-message></p>
           <div class="modal-actions"><button type="button" class="ghost-button" data-close-player-profile>Annulla</button><button type="submit" class="primary-action">Salva scheda</button></div>
         </form>
@@ -1414,6 +1475,18 @@ function drawerHtml(event) {
               ${event.place || 'Non indicato'}
             </strong>
           </div>
+
+          ${event.type === 'match' && event.matchType ? `
+                <div class="event-info-card">
+                  <span>Tipo partita</span>
+                  <strong class="event-info-card__value">${escapeHtml(matchTypeLabel(event.matchType))}</strong>
+                </div>` : ''}
+
+          ${event.type === 'match' && event.opponent ? `
+                <div class="event-info-card">
+                  <span>Avversario</span>
+                  <strong class="event-info-card__value">${escapeHtml(event.opponent)}</strong>
+                </div>` : ''}
 
           ${isTrainingEventType(event.type)
             ? `
@@ -1515,6 +1588,21 @@ function newEventModalHtml(selectedDate = formatDateInputValue(new Date())) {
             </select>
           </label>
 
+          <div data-match-fields hidden>
+            <label>
+              Tipo partita
+              <select name="matchType">
+                <option value="friendly">Amichevole</option>
+                <option value="cup">Coppa</option>
+                <option value="league">Campionato</option>
+              </select>
+            </label>
+            <label>
+              Avversario
+              <input name="opponent" type="text" maxlength="80" autocomplete="off" value="Da definire" placeholder="Nome squadra avversaria">
+            </label>
+          </div>
+
           <div class="new-event-form__row">
             <label>
               Data
@@ -1532,7 +1620,13 @@ function newEventModalHtml(selectedDate = formatDateInputValue(new Date())) {
             <select name="location" required>
               <option value="Mezzolara">Mezzolara</option>
               <option value="Budrio">Budrio</option>
+              <option value="__custom__">Altro campo…</option>
             </select>
+          </label>
+
+          <label data-custom-location hidden>
+            Nome campo / impianto
+            <input name="customLocation" type="text" maxlength="100" autocomplete="off" placeholder="Scrivi il nome del campo">
           </label>
 
           <label data-md-field>
@@ -1548,17 +1642,6 @@ function newEventModalHtml(selectedDate = formatDateInputValue(new Date())) {
               <option value="MD+3">MD+3</option>
             </select>
           </label>
-
-          <div class="new-event-form__row" data-attendance-fields>
-            <label>
-              Presenti
-              <input name="presentCount" type="number" min="0" max="99" inputmode="numeric" placeholder="25">
-            </label>
-            <label>
-              Totale rosa
-              <input name="squadTotal" type="number" min="1" max="99" inputmode="numeric" placeholder="28">
-            </label>
-          </div>
 
           <label data-training-sheet-field>
             Training Sheet
@@ -1654,6 +1737,21 @@ function editEventModalHtml(event) {
             </select>
           </label>
 
+          <div data-match-fields ${event.type === 'match' ? '' : 'hidden'}>
+            <label>
+              Tipo partita
+              <select name="matchType">
+                <option value="friendly" ${event.matchType === 'friendly' ? 'selected' : ''}>Amichevole</option>
+                <option value="cup" ${event.matchType === 'cup' ? 'selected' : ''}>Coppa</option>
+                <option value="league" ${event.matchType === 'league' ? 'selected' : ''}>Campionato</option>
+              </select>
+            </label>
+            <label>
+              Avversario
+              <input name="opponent" type="text" maxlength="80" autocomplete="off" value="${escapeHtml(event.opponent || 'Da definire')}" placeholder="Nome squadra avversaria">
+            </label>
+          </div>
+
           <div class="new-event-form__row">
             <label>
               Data
@@ -1669,13 +1767,15 @@ function editEventModalHtml(event) {
           <label>
             Campo
             <select name="location" required>
-              <option value="Mezzolara" ${event.place === 'Mezzolara' ? 'selected' : ''}>
-                Mezzolara
-              </option>
-              <option value="Budrio" ${event.place === 'Budrio' ? 'selected' : ''}>
-                Budrio
-              </option>
+              <option value="Mezzolara" ${event.place === 'Mezzolara' ? 'selected' : ''}>Mezzolara</option>
+              <option value="Budrio" ${event.place === 'Budrio' ? 'selected' : ''}>Budrio</option>
+              <option value="__custom__" ${event.place && !['Mezzolara','Budrio'].includes(event.place) ? 'selected' : ''}>Altro campo…</option>
             </select>
+          </label>
+
+          <label data-custom-location ${event.place && !['Mezzolara','Budrio'].includes(event.place) ? '' : 'hidden'}>
+            Nome campo / impianto
+            <input name="customLocation" type="text" maxlength="100" autocomplete="off" value="${event.place && !['Mezzolara','Budrio'].includes(event.place) ? escapeHtml(event.place) : ''}" placeholder="Scrivi il nome del campo">
           </label>
 
           <label data-md-field ${isTrainingEventType(event.type) ? '' : 'hidden'}>
@@ -1691,17 +1791,6 @@ function editEventModalHtml(event) {
               <option value="MD+3" ${event.matchDay === 'MD+3' ? 'selected' : ''}>MD+3</option>
             </select>
           </label>
-
-          <div class="new-event-form__row" data-attendance-fields ${isTrainingEventType(event.type) ? '' : 'hidden'}>
-            <label>
-              Presenti
-              <input name="presentCount" type="number" min="0" max="99" inputmode="numeric" value="${event.presentCount ?? ''}" placeholder="25">
-            </label>
-            <label>
-              Totale rosa
-              <input name="squadTotal" type="number" min="1" max="99" inputmode="numeric" value="${event.squadTotal ?? ''}" placeholder="28">
-            </label>
-          </div>
 
           <label
             data-training-sheet-field
@@ -2023,15 +2112,32 @@ export async function attachAppEvents(user) {
     const trainingSheetInput = form?.querySelector('[name="trainingSheet"]')
     const mdField = form?.querySelector('[data-md-field]')
     const mdSelect = form?.querySelector('[name="matchDay"]')
-    const attendanceFields = form?.querySelector('[data-attendance-fields]')
+    const matchFields = form?.querySelector('[data-match-fields]')
+    const matchTypeSelect = form?.querySelector('[name="matchType"]')
+    const opponentInput = form?.querySelector('[name="opponent"]')
+    const locationSelect = form?.querySelector('[name="location"]')
+    const customLocationField = form?.querySelector('[data-custom-location]')
+    const customLocationInput = form?.querySelector('[name="customLocation"]')
 
     if (!typeSelect || !trainingSheetField) return
+
+    const refreshLocation = () => {
+      const isCustom = locationSelect?.value === '__custom__'
+      if (customLocationField) customLocationField.hidden = !isCustom
+      if (customLocationInput) {
+        customLocationInput.required = Boolean(isCustom)
+        if (!isCustom) customLocationInput.value = ''
+      }
+    }
 
     const refresh = () => {
       const showTrainingSheet = isTrainingEventType(typeSelect.value)
       trainingSheetField.hidden = !showTrainingSheet
       if (mdField) mdField.hidden = !showTrainingSheet
-      if (attendanceFields) attendanceFields.hidden = !showTrainingSheet
+      const showMatchType = typeSelect.value === 'match'
+      if (matchFields) matchFields.hidden = !showMatchType
+      if (!showMatchType && matchTypeSelect) matchTypeSelect.value = 'friendly'
+      if (!showMatchType && opponentInput) opponentInput.value = ''
 
       if (!showTrainingSheet && trainingSheetInput) {
         trainingSheetInput.value = ''
@@ -2043,7 +2149,9 @@ export async function attachAppEvents(user) {
     }
 
     typeSelect.addEventListener('change', refresh)
+    locationSelect?.addEventListener('change', refreshLocation)
     refresh()
+    refreshLocation()
   }
 
   function enableDateTimePickers(form) {
@@ -2103,27 +2211,25 @@ export async function attachAppEvents(user) {
       )
       const date = formData.get('date')
       const time = formData.get('time')
-      const location = String(
-        formData.get('location') ?? '',
-      ).trim()
+      const locationChoice = String(formData.get('location') ?? '').trim()
+      const customLocation = String(formData.get('customLocation') ?? '').trim()
+      const location = locationChoice === '__custom__' ? customLocation : locationChoice
       const file = formData.get('trainingSheet')
+      const matchType = eventType === 'match' ? String(formData.get('matchType') || 'friendly') : null
+      const opponent = eventType === 'match' ? String(formData.get('opponent') || '').trim() : ''
       const matchDay = isTrainingEventType(eventType)
         ? String(formData.get('matchDay') ?? '').trim() || null
         : null
-      const presentCount = isTrainingEventType(eventType) && formData.get('presentCount') !== ''
-        ? Number(formData.get('presentCount'))
-        : null
-      const squadTotal = isTrainingEventType(eventType) && formData.get('squadTotal') !== ''
-        ? Number(formData.get('squadTotal'))
-        : null
+      const presentCount = null
+      const squadTotal = null
 
-      if (presentCount !== null && squadTotal !== null && presentCount > squadTotal) {
-        message.textContent = 'I presenti non possono superare il totale rosa.'
+      if (eventType === 'match' && !opponent) {
+        message.textContent = 'Inserisci il nome della squadra avversaria.'
         return
       }
 
-      if (!date || !time) {
-        message.textContent = 'Inserisci data e ora.'
+      if (!date || !time || !location) {
+        message.textContent = 'Inserisci data, ora e campo.'
         return
       }
 
@@ -2131,12 +2237,7 @@ export async function attachAppEvents(user) {
       saveButton.textContent = 'Salvataggio...'
       message.textContent = ''
 
-      const eventTitles = {
-        training: 'Allenamento',
-        match: 'Partita',
-        meeting: 'Riunione',
-        rest: 'Riposo',
-      }
+      const eventTitle = buildEventTitle(eventType, matchType, opponent)
 
       let filePath = null
 
@@ -2177,7 +2278,7 @@ export async function attachAppEvents(user) {
       const { error: insertError } = await supabase
         .from('events')
         .insert({
-          title: eventTitles[eventType] ?? 'Evento',
+          title: eventTitle,
           event_type: eventType,
           start_at: startAt,
           location: location || null,
@@ -2286,27 +2387,25 @@ export async function attachAppEvents(user) {
       )
       const date = formData.get('date')
       const time = formData.get('time')
-      const location = String(
-        formData.get('location') ?? '',
-      ).trim()
+      const locationChoice = String(formData.get('location') ?? '').trim()
+      const customLocation = String(formData.get('customLocation') ?? '').trim()
+      const location = locationChoice === '__custom__' ? customLocation : locationChoice
       const file = formData.get('trainingSheet')
+      const matchType = eventType === 'match' ? String(formData.get('matchType') || 'friendly') : null
+      const opponent = eventType === 'match' ? String(formData.get('opponent') || '').trim() : ''
       const matchDay = isTrainingEventType(eventType)
         ? String(formData.get('matchDay') ?? '').trim() || null
         : null
-      const presentCount = isTrainingEventType(eventType) && formData.get('presentCount') !== ''
-        ? Number(formData.get('presentCount'))
-        : null
-      const squadTotal = isTrainingEventType(eventType) && formData.get('squadTotal') !== ''
-        ? Number(formData.get('squadTotal'))
-        : null
+      const presentCount = null
+      const squadTotal = null
 
-      if (presentCount !== null && squadTotal !== null && presentCount > squadTotal) {
-        message.textContent = 'I presenti non possono superare il totale rosa.'
+      if (eventType === 'match' && !opponent) {
+        message.textContent = 'Inserisci il nome della squadra avversaria.'
         return
       }
 
-      if (!date || !time) {
-        message.textContent = 'Inserisci data e ora.'
+      if (!date || !time || !location) {
+        message.textContent = 'Inserisci data, ora e campo.'
         return
       }
 
@@ -2314,12 +2413,7 @@ export async function attachAppEvents(user) {
       saveButton.textContent = 'Salvataggio...'
       message.textContent = ''
 
-      const eventTitles = {
-        training: 'Allenamento',
-        match: 'Partita',
-        meeting: 'Riunione',
-        rest: 'Riposo',
-      }
+      const eventTitle = buildEventTitle(eventType, matchType, opponent)
 
       let nextFilePath = isTrainingEventType(eventType)
         ? currentEvent.trainingSheetPath
@@ -2353,7 +2447,7 @@ export async function attachAppEvents(user) {
       const { error: updateError } = await supabase
         .from('events')
         .update({
-          title: eventTitles[eventType] ?? 'Evento',
+          title: eventTitle,
           event_type: eventType,
           start_at: startAt,
           location: location || null,
@@ -2361,6 +2455,9 @@ export async function attachAppEvents(user) {
           present_count: presentCount,
           squad_total: squadTotal,
           training_sheet_path: nextFilePath,
+          ...(isTrainingEventType(eventType) && currentEvent.rawNotes !== null
+            ? { notes: currentEvent.rawNotes }
+            : {}),
         })
         .eq('id', currentEvent.id)
 
@@ -2545,6 +2642,19 @@ export async function attachAppEvents(user) {
       const preview = manualEditor.querySelector('[data-ts-preview]')
       const phasesRoot = manualEditor.querySelector('[data-ts-phases]')
       const draftState = manualEditor.querySelector('[data-ts-draft-state] span')
+      const tsLocationSelect = form?.elements.location
+      const tsCustomLocationField = manualEditor.querySelector('[data-ts-custom-location]')
+      const tsCustomLocationInput = form?.elements.custom_location
+      const syncTsLocation = () => {
+        const isCustom = tsLocationSelect?.value === '__custom__'
+        if (tsCustomLocationField) tsCustomLocationField.hidden = !isCustom
+        if (tsCustomLocationInput) {
+          tsCustomLocationInput.required = Boolean(isCustom)
+          if (!isCustom) tsCustomLocationInput.value = ''
+        }
+      }
+      tsLocationSelect?.addEventListener('change', syncTsLocation)
+      syncTsLocation()
       const storageKey = 'nz-training-sheet-editor-v6-2'
       let phaseCount = 0
       let saveTimer = null
@@ -2594,11 +2704,34 @@ export async function attachAppEvents(user) {
           return { title, duration, goalkeepers, description, variants, coaching }
         })
         return {
-          date: fd.get('date') || '', time: fd.get('time') || '', location: fd.get('location') || '', progressive: fd.get('progressive') || '', present: updatePresentCount(), focus: fd.get('focus') || '', match_day: fd.get('match_day') || '', intensity: fd.get('intensity') || '', volume: fd.get('volume') || '', objective: fd.get('objective') || '', principles: fd.get('principles') || '', pillars: selectedPillars(), absent: selectedPlayers('absent'), injured: selectedPlayers('injured'), phases
+          date: fd.get('date') || '', time: fd.get('time') || '', location: fd.get('location') === '__custom__' ? (fd.get('custom_location') || '') : (fd.get('location') || ''), progressive: fd.get('progressive') || '', present: updatePresentCount(), focus: fd.get('focus') || '', match_day: fd.get('match_day') || '', intensity: fd.get('intensity') || '', volume: fd.get('volume') || '', objective: fd.get('objective') || '', principles: fd.get('principles') || '', pillars: selectedPillars(), absent: selectedPlayers('absent'), injured: selectedPlayers('injured'), phases
         }
       }
 
       const bar = (value) => `<span class="ts-mini-scale">${[1,2,3,4,5].map(n=>`<i class="${Number(value)>=n?'on':''}"></i>`).join('')}</span>`
+      const fitPreviewToViewport = () => {
+        const frame = manualEditor.querySelector('.ts-paper-frame')
+        if (!frame || !preview) return
+        if (window.innerWidth > 720) {
+          preview.style.width = ''
+          preview.style.transform = ''
+          preview.style.transformOrigin = ''
+          frame.style.height = ''
+          frame.style.overflow = ''
+          return
+        }
+        const paperWidth = 680
+        const available = Math.max(280, frame.clientWidth - 2)
+        const scale = Math.min(1, available / paperWidth)
+        preview.style.width = `${paperWidth}px`
+        preview.style.transformOrigin = 'top left'
+        preview.style.transform = `scale(${scale})`
+        requestAnimationFrame(() => {
+          frame.style.height = `${Math.ceil(preview.scrollHeight * scale + 4)}px`
+          frame.style.overflow = 'hidden'
+        })
+      }
+
       const updatePreview = () => {
         const d = collect()
         const formattedDate = d.date ? new Date(`${d.date}T12:00:00`).toLocaleDateString('it-IT') : '—'
@@ -2615,7 +2748,9 @@ export async function attachAppEvents(user) {
           <section class="ts-paper-body"><div class="ts-paper-phases">${d.phases.length ? d.phases.map((p,i)=>`<article><div><b>${String(i+1).padStart(2,'0')}</b><strong>FASE ${i+1}${p.title?` · ${escape(p.title)}`:''}</strong><span class="ts-phase-gk">Portieri: ${p.goalkeepers==='yes'?'Sì':p.goalkeepers==='separate'?'Separati':'No'}</span><span>${escape(p.duration || '—')}'</span></div><p>${escape(p.description || 'Descrizione da completare')}</p>${p.variants?`<small><b>Varianti:</b> ${escape(p.variants)}</small>`:''}${p.coaching?`<small><b>Coaching point:</b> ${escape(p.coaching)}</small>`:''}</article>`).join('') : '<p class="ts-paper-empty">Aggiungi la prima fase.</p>'}</div></section>
           </div>
         `
+        requestAnimationFrame(fitPreviewToViewport)
       }
+      window.addEventListener('resize', fitPreviewToViewport, { passive: true })
 
       const saveDraft = () => {
         localStorage.setItem(storageKey, JSON.stringify(collect()))
@@ -2817,6 +2952,8 @@ export async function attachAppEvents(user) {
         form.reset()
         form.elements.time.value = '17:30'
         form.elements.location.value = 'Mezzolara'
+        if (form.elements.custom_location) form.elements.custom_location.value = ''
+        syncTsLocation()
         manualEditor.querySelectorAll('[data-md] button, [data-md]').forEach?.(() => {})
         manualEditor.querySelectorAll('[data-md]').forEach((button) => button.classList.remove('is-active'))
         manualEditor.querySelectorAll('[data-rating] button').forEach((button) => button.classList.remove('is-active'))
@@ -2843,7 +2980,15 @@ export async function attachAppEvents(user) {
         } else {
           form.elements.date.value = new Date(selected.startAt).toLocaleDateString('sv-SE')
           form.elements.time.value = selected.time || '17:30'
-          form.elements.location.value = selected.place || 'Mezzolara'
+          const selectedPlace = selected.place || 'Mezzolara'
+          if (['Mezzolara','Budrio'].includes(selectedPlace)) {
+            form.elements.location.value = selectedPlace
+            if (form.elements.custom_location) form.elements.custom_location.value = ''
+          } else {
+            form.elements.location.value = '__custom__'
+            if (form.elements.custom_location) form.elements.custom_location.value = selectedPlace
+          }
+          syncTsLocation()
           form.elements.match_day.value = selected.matchDay || ''
           form.elements.progressive.value = String(Number(selected.trainingSheetPath?.match(/(?:ALL|AL)[_-]?(\d{1,3})/i)?.[1] || determineNextProgressive()))
           manualEditor.querySelectorAll('[data-md]').forEach((button) => button.classList.toggle('is-active', button.dataset.md === selected.matchDay))

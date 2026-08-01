@@ -1,0 +1,22 @@
+NZ V6.3.1 — UX, responsive e tipologia partita
+
+Interventi:
+- Scheda giocatore riequilibrata: form scrollabile, campi note coerenti, textarea scure e leggibili.
+- Filigrana NZ / NICOLA ZECCHI resa più visibile in anteprima e PDF.
+- Calendario settimanale mobile compattato: tutti i 7 giorni visibili senza scorrimento orizzontale.
+- Pulsante "Apri calendario" uniformato allo stile del portale.
+- Campi del Training Sheet Editor resi più compatti e regolari.
+- Anteprima Training Sheet mobile adattata automaticamente alla larghezza disponibile, senza barra orizzontale.
+- Aggiunta classificazione partita: Amichevole, Coppa, Campionato.
+- Tipologia partita salvata nei metadati dell'evento, mostrata nel calendario, nella dashboard e nel dettaglio evento.
+- Colori soft e distinti per le tre tipologie di partita.
+
+Compatibilità database:
+- Nessuna nuova colonna necessaria. La tipologia partita è salvata nel campo notes esistente.
+
+Verifiche:
+- Sintassi app.js: superata.
+- Sintassi main.js: superata.
+- Sintassi icons.js: superata.
+- Bilanciamento parentesi CSS: superato.
+- Build Vite non eseguibile nel container per indisponibilità del pacchetto vite 8.1.5 nel registro interno.

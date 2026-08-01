@@ -1,0 +1,8 @@
+NZ V6.3.3 — Layout, campi personalizzati e prossime partite
+
+- Blocco Dati seduta ridisegnato con griglia professionale e responsive.
+- Campo/impianto personalizzato disponibile nel Calendario e nel Training Sheet Editor.
+- I campi personalizzati vengono validati, salvati e ripristinati in modifica.
+- Dashboard aggiornata con le prossime tre partite in ordine cronologico.
+- Visualizzati i giorni mancanti alla prima partita e la distanza tra le partite successive.
+- Migliorati feedback, gerarchie, spaziature, accessibilità e comportamento mobile.
