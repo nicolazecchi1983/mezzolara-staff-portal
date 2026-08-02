@@ -1,0 +1,28 @@
+V6.4.5 — MATCH SHEET STABLE
+
+CORREZIONI BLOCCANTI
+- Risolto il ReferenceError causato dall'uso di rosterOptions fuori dal proprio scope.
+- Ripristinato il funzionamento dei pulsanti + per sostituzioni, gol/assist e sanzioni.
+- Gestione dei pulsanti + tramite event delegation, più robusta anche dopo aggiornamenti dinamici del DOM.
+- Aggiunta gestione esplicita degli errori con messaggio nell'indicatore di salvataggio.
+
+REPORT
+- Eliminata l'apertura della pagina bianca in una nuova scheda.
+- Crea report PDF apre ora un'anteprima interna professionale.
+- Conferma separata prima dell'apertura della finestra di stampa/salvataggio PDF.
+- Stampa eseguita tramite iframe isolato usando gli stessi fogli di stile caricati dall'app.
+
+TRAINING SHEET
+- Ripristinata la toolbar compatta e stabile precedente.
+- Crea PDF riportato accanto all'Anteprima live.
+- Rimossa la resa grafica sovradimensionata del pulsante PDF.
+
+QUALITÀ UI
+- Pulsanti + uniformati, accessibili e con feedback hover/active.
+- Righe evento più leggibili e separate.
+- Modale report responsive a schermo intero su smartphone.
+
+VERIFICHE
+- node --check src/components/app.js: superato.
+- Bilanciamento parentesi CSS: superato.
+- Nessun file .env, .git, node_modules o dist incluso.

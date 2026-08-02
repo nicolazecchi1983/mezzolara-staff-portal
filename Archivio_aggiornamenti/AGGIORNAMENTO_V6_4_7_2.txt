@@ -1,0 +1,7 @@
+V6.4.7.2 — Correzioni Match Sheet
+- Gli eventi Riposo non mostrano più l'orario nella cella del Calendario.
+- Le anteprime report sotto le sezioni si aggiornano realmente durante la compilazione.
+- Il passaggio Report è correttamente impostato come sezione 5 di 5.
+- Il pulsante per aggiungere un cambio sistema avversario è sotto l'elenco, con etichetta esplicita.
+- Le pedine della formazione avversaria sono trascinabili con mouse e touch.
+- Le posizioni avversarie vengono salvate nella bozza e riportate nel report finale.

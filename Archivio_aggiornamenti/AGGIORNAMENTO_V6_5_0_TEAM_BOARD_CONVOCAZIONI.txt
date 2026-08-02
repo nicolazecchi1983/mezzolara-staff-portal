@@ -1,0 +1,11 @@
+V6.5.0 — TEAM IDENTITY, BOARD E CONVOCAZIONI
+
+- Identità squadra configurabile in Impostazioni: nome, nome breve, logo, stagione, categoria, colori, stile pedina e staff.
+- Branding dinamico nella sidebar e nella barra mobile.
+- Nuova sezione Board con due squadre, moduli e pedine trascinabili.
+- Convocazioni integrate nella Rosa con conteggio progressivo, limite 20, valutazioni extra e PDF.
+- Match Sheet: risultato più rapido con due campi numerici, nome squadra dinamico, moduli ampliati e stile pedine avversarie.
+- Moduli tattici aggiornati con sistemi comuni e varianti inviate.
+- Persistenza locale sicura delle nuove impostazioni e delle bozze.
+
+Nota: la persistenza cloud multi-club richiederà una successiva migrazione Supabase dedicata.

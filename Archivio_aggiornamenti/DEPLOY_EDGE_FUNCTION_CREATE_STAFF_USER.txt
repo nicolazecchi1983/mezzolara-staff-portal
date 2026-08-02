@@ -1,0 +1,28 @@
+RELEASE A.3 - CREAZIONE UTENTI DAL PORTALE
+
+La creazione utenti usa una Supabase Edge Function. La service-role key rimane esclusivamente sul server e non viene mai inserita nel browser.
+
+METODO PIU SEMPLICE - DASHBOARD SUPABASE
+
+1. Apri Supabase > Edge Functions.
+2. Crea una nuova funzione con nome esatto:
+   create-staff-user
+3. Copia tutto il contenuto del file:
+   supabase/functions/create-staff-user/index.ts
+4. Salva e fai Deploy.
+5. Lascia attiva la verifica JWT (impostazione predefinita).
+
+Supabase rende già disponibili alla funzione:
+- SUPABASE_URL
+- SUPABASE_ANON_KEY
+- SUPABASE_SERVICE_ROLE_KEY
+
+NON copiare mai SUPABASE_SERVICE_ROLE_KEY nel file .env del portale o nel codice frontend.
+
+TEST
+
+1. Accedi al portale come amministratore.
+2. Impostazioni > Gestione Staff.
+3. Premi + Nuovo utente.
+4. Compila i campi e premi Crea utente.
+5. Il nuovo account deve comparire subito nella lista Staff.

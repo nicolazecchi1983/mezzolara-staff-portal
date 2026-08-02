@@ -1,0 +1,9 @@
+V6.3.10 — FASI E FILIGRANA
+
+- Il titolo della fase occupa ora tutta la larghezza disponibile.
+- Durata e Portieri sono raccolti in una seconda riga compatta e leggibile.
+- La durata mostra l'unita min senza appesantire l'input.
+- Nell'anteprima e nel PDF, Portieri e Durata sono riuniti in un gruppo meta allineato a destra.
+- La filigrana NZ usa un centro ottico stabile e non si sposta più verso sinistra nel PDF.
+- La trama diagonale NICOLA ZECCHI viene centrata sul foglio prima della rotazione.
+- Responsive verificato per desktop, tablet e smartphone.

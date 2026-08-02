@@ -1,0 +1,9 @@
+NZ V6.4.4 — Match Sheet Professional UX
+
+- Training Sheet: selettore TS pubblicate su riga dedicata; Apri, Reset e Crea PDF allineati.
+- Disponibilità Rosa: Assenti, Infortunati, Differenziato e Aggregati. Differenziato escluso dai presenti; Aggregati inclusi.
+- Match Sheet: formazione più pulita; capitano con menu dedicato; panchina rinominata A disposizione con numero di maglia.
+- Eventi partita dinamici: una riga iniziale e pulsante + per sostituzioni, gol/assist e sanzioni.
+- Fase di possesso avversaria aggiornata alla metodologia richiesta.
+- Report con campo tattico coerente con il form, A disposizione numerati e grafica più professionale.
+- Pulsanti, griglie e responsive uniformati.

@@ -1,5 +1,8 @@
 import { icon } from './icons.js'
 import { supabase } from '../supabase.js'
+import { getTeamProfile, loadTeamProfile, saveTeamProfile } from '../services/teamProfile.js'
+import { printHtmlDocument } from '../services/pdfService.js'
+import { createStaffUser, deleteStaffUser, generateTemporaryPassword } from '../services/staffAdmin.js'
 
 import {
   players,
@@ -8,21 +11,79 @@ import {
 
 let calendarEvents = []
 let currentUserRole = 'observer'
+let currentUserAppRole = 'read_only'
 let currentUser = null
 let currentUserProfile = null
 let staffProfiles = []
 let analysisEntries = []
 let playerProfiles = {}
+let staffFlashMessage = ''
 let currentCalendarDate = new Date()
 currentCalendarDate.setDate(1)
 
+function readLocalJson(key, fallback) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || 'null')
+    return parsed && typeof parsed === 'object' ? parsed : fallback
+  } catch {
+    return fallback
+  }
+}
+
+function teamLogoHtml(className = 'team-logo') {
+  const team = getTeamProfile()
+  if (team.logo) {
+    return `<img class="${className}" src="${escapeHtml(team.logo)}" alt="Logo ${escapeHtml(team.shortName || team.name)}">`
+  }
+  const initials = String(team.shortName || team.name || 'TEAM')
+    .split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase()
+  return `<span class="${className} ${className}--fallback">${escapeHtml(initials || 'T')}</span>`
+}
+
+const COMMON_FORMATIONS = Object.freeze([
+  '2-3-5','3-1-4-2','3-2-3-2','3-2-4-1','3-3-1-3','3-3-3-1','3-4-1-2',
+  '3-4-2-1','3-4-3','3-5-1-1','3-5-2','3-6-1','4-1-2-1-2','4-1-2-3',
+  '4-2-3-1','4-2-4','4-3-1-2','4-3-2-1','4-3-3','4-3-3 (falso 9)',
+  '4-3-3 mediano','4-3-3 offensivo','4-4-1-1','4-4-2','4-4-2 rombo',
+  '4-5-1','4-6-0','5-2-1-2','5-2-3','5-3-2','5-3-2 quinti','5-4-1',
+  '5-4-1 difensivo','WM 3-2-2-3','Personalizzato',
+])
+
+function formationOptionsHtml(selected = '') {
+  return COMMON_FORMATIONS
+    .map((value) => `<option value="${escapeHtml(value)}" ${selected === value ? 'selected' : ''}>${escapeHtml(value)}</option>`)
+    .join('')
+}
+
+function normalizeScore(home, away) {
+  const left = String(home ?? '').trim()
+  const right = String(away ?? '').trim()
+  return left || right ? `${left || 0}-${right || 0}` : ''
+}
+
+function scoreFieldsHtml(prefix, label) {
+  return `<fieldset class="match-score-fieldset">
+    <legend>${label}</legend>
+    <div class="match-score-pair">
+      <label><span>Noi</span><input type="number" min="0" max="99" inputmode="numeric" name="${prefix}_home" placeholder="0"></label>
+      <b aria-hidden="true">–</b>
+      <label><span>Avversari</span><input type="number" min="0" max="99" inputmode="numeric" name="${prefix}_away" placeholder="0"></label>
+    </div>
+    <input type="hidden" name="${prefix}">
+  </fieldset>`
+}
+
 function isOwner() {
-  return ['owner', 'admin', 'administrator'].includes(currentUserRole)
+  return currentUserAppRole === 'owner' || currentUserAppRole === 'admin'
+}
+
+function isPortalOwner() {
+  return currentUserAppRole === 'owner'
 }
 
 function roleLabel(role) {
   const labels = {
-    owner: 'Amministratore',
+    owner: 'Proprietario',
     coach: 'Allenatore',
     assistant: 'Vice allenatore',
     athletic_coach: 'Preparatore fisico',
@@ -36,6 +97,23 @@ function roleLabel(role) {
   }
 
   return labels[role] ?? 'Staff'
+}
+
+function technicalRoleOptions(selected = 'observer') {
+  return [
+    ['coach','Allenatore'], ['assistant','Vice allenatore'],
+    ['athletic_coach','Preparatore fisico'], ['goalkeeper_coach','Preparatore portieri'],
+    ['analyst','Match analyst'], ['observer','Osservatore'], ['physio','Fisioterapista'],
+    ['collaborator','Collaboratore tecnico'], ['sporting_director','Direttore sportivo'],
+  ].map(([value, label]) => `<option value="${value}" ${selected === value || (selected === 'owner' && value === 'coach') ? 'selected' : ''}>${label}</option>`).join('')
+}
+
+function appRoleOptions(selected = 'collaborator', { includeOwner = false } = {}) {
+  const options = [
+    ...(includeOwner ? [['owner', 'Proprietario']] : []),
+    ['admin','Amministratore'], ['collaborator','Collaboratore'], ['read_only','Solo lettura'],
+  ]
+  return options.map(([value, label]) => `<option value="${value}" ${selected === value ? 'selected' : ''}>${label}</option>`).join('')
 }
 
 function profileFullName(profile, user = currentUser) {
@@ -60,25 +138,28 @@ function profileFullName(profile, user = currentUser) {
 async function loadCurrentUserRole(user) {
   if (!user?.id) {
     currentUserRole = 'observer'
+    currentUserAppRole = 'read_only'
     currentUserProfile = null
     return
   }
 
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, first_name, last_name, email, role, active')
+    .select('id, first_name, last_name, email, role, app_role, active')
     .eq('id', user.id)
     .maybeSingle()
 
   if (error) {
     console.error('Errore caricamento profilo:', error.message)
     currentUserRole = 'observer'
+    currentUserAppRole = 'read_only'
     currentUserProfile = null
     return
   }
 
   currentUserProfile = data ?? null
   currentUserRole = data?.role ?? 'observer'
+  currentUserAppRole = data?.app_role ?? (data?.role === 'owner' ? 'owner' : data?.role === 'read_only' ? 'read_only' : 'collaborator')
 
   if (data?.active === false) {
     await supabase.auth.signOut()
@@ -131,9 +212,33 @@ async function loadStaffProfiles() {
     return
   }
 
+  const teamId = getTeamProfile().id
+  if (!teamId) {
+    staffProfiles = currentUserProfile ? [currentUserProfile] : []
+    return
+  }
+
+  const { data: memberships, error: membershipError } = await supabase
+    .from('team_members')
+    .select('user_id')
+    .eq('team_id', teamId)
+
+  if (membershipError) {
+    console.error('Errore caricamento membri squadra:', membershipError.message)
+    staffProfiles = []
+    return
+  }
+
+  const userIds = [...new Set((memberships ?? []).map((item) => item.user_id).filter(Boolean))]
+  if (!userIds.length) {
+    staffProfiles = currentUserProfile ? [currentUserProfile] : []
+    return
+  }
+
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, first_name, last_name, email, role, active, updated_at')
+    .select('id, first_name, last_name, email, role, app_role, active, updated_at')
+    .in('id', userIds)
     .order('first_name', { ascending: true })
     .order('last_name', { ascending: true })
 
@@ -211,6 +316,7 @@ async function loadCalendarEvents() {
         matchType: event.match_type || (parsedNotes?.type === 'match_event' ? parsedNotes.match_type || null : null) || titleMatchData.matchType,
         opponent: event.opponent || (parsedNotes?.type === 'match_event' ? parsedNotes.opponent || '' : '') || titleMatchData.opponent,
         rawNotes: event.notes || null,
+        restNote: parsedNotes?.type === 'rest_event' ? parsedNotes.rest_note || '' : '',
       }
     }),
   )
@@ -221,6 +327,8 @@ const menu = [
   ['calendar', 'Calendario'],
   ['training-sheet', 'Training Sheet Editor'],
   ['library', 'Training Library'],
+  ['match-sheet', 'Match Sheet Editor'],
+  ['board', 'Board'],
   ['squad', 'Rosa'],
   ['analysis', 'Analisi Gare'],
   ['methodology', 'Metodologia'],
@@ -543,7 +651,7 @@ function calendarCells() {
                     ${event.title}
                   </strong>
 
-                  <span>${event.time}${eventPlaceLabel(event)}</span>
+                  ${event.type === 'rest' ? '' : `<span>${event.time}${eventPlaceLabel(event)}</span>`}
                   ${event.type === 'training' ? `<small class="calendar-event-details">${event.matchDay || 'MD —'}${event.editorData?.focus ? ` · ${escapeHtml(event.editorData.focus)}` : ''}${event.trainingSheetPath ? ' · TS' : ''}</small>` : ''}
                   ${event.type === 'match' && event.matchType ? `<small class="calendar-event-details">${escapeHtml(matchTypeLabel(event.matchType))}</small>` : ''}
                 </button>
@@ -669,8 +777,32 @@ function squadView() {
           <h1>Rosa</h1>
           <p><span>${activePlayers.length} GIOCATORI</span><b>•</b>Serie D</p>
         </div>
-        <button class="primary-action" type="button">${icon('plus')}Nuovo giocatore</button>
+        <div class="page-actions">
+          <button class="primary-action" type="button">${icon('plus')}Nuovo giocatore</button>
+          <button class="ghost-button" type="button" data-open-callups>Convocazioni</button>
+        </div>
       </div>
+
+      <section class="callups-panel" data-callups-panel hidden>
+        <div class="callups-head">
+          <div><span>CONVOCAZIONI</span><h2>Lista convocati</h2><p>Seleziona fino a 20 giocatori. Puoi sbloccare posti aggiuntivi solo quando necessario.</p></div>
+          <div class="callups-counter"><strong data-callups-count>0</strong><span>/ 20</span></div>
+        </div>
+        <div class="callups-toolbar">
+          <label><span>Partita / avversario</span><input data-callups-match placeholder="Es. Copparese"></label>
+          <label><span>Data</span><input type="date" data-callups-date></label>
+          <button class="ghost-button" type="button" data-callups-extra>Aggiungi valutazione extra</button>
+          <button class="primary-action" type="button" data-callups-pdf disabled>Crea PDF convocazioni</button>
+        </div>
+        <div class="callups-alert" data-callups-alert hidden>Hai raggiunto 20 convocati.</div>
+        <div class="callups-list">
+          ${activePlayers
+            .slice()
+            .sort((a,b)=>String(a.name).split(/\s+/).pop().localeCompare(String(b.name).split(/\s+/).pop(),'it'))
+            .map((player,index)=>`<label class="callup-player"><input type="checkbox" value="${escapeHtml(player.name)}" data-callup-player><b data-callup-order>${String(index+1).padStart(2,'0')}</b><span>${escapeHtml(player.name)}</span><small>${escapeHtml(player.role)}</small></label>`)
+            .join('')}
+        </div>
+      </section>
 
       <div class="squad-departments">
         ${groupedPlayers.map((group) => `
@@ -1025,6 +1157,39 @@ function tsEscapeHtml(value = '') {
     .replace(/'/g, '&#039;')
 }
 
+const TS_DEPARTMENT_ORDER = ['Portiere', 'Difensore', 'Centrocampista', 'Attaccante']
+const TS_DEPARTMENT_LABELS = {
+  Portiere: 'Portieri',
+  Difensore: 'Difensori',
+  Centrocampista: 'Centrocampisti',
+  Attaccante: 'Attaccanti',
+}
+
+function toItalianTitleCase(value = '') {
+  return String(value)
+    .toLocaleLowerCase('it-IT')
+    .replace(/(^|[\s'’-])([a-zà-ÿ])/g, (_, prefix, letter) => prefix + letter.toLocaleUpperCase('it-IT'))
+}
+
+function getTrainingSheetRosterPlayers() {
+  return players
+    .filter((player) => player.name !== 'Andrea Giovannini')
+    .map((player) => {
+      const canonicalName = toItalianTitleCase(player.name)
+      const parts = canonicalName.trim().split(/\s+/)
+      const surname = parts.pop() || ''
+      const firstName = parts.join(' ')
+      return {
+        ...player,
+        canonicalName,
+        displayName: `${surname} ${firstName}`.trim(),
+        surname,
+        department: TS_DEPARTMENT_ORDER.includes(player.role) ? player.role : 'Difensore',
+      }
+    })
+    .sort((a, b) => a.surname.localeCompare(b.surname, 'it', { sensitivity: 'base' }))
+}
+
 function trainingSheetEditorView() {
   if (!isOwner()) {
     return `
@@ -1035,27 +1200,15 @@ function trainingSheetEditorView() {
     `
   }
 
-  const titleCaseName = (value = '') => String(value).toLocaleLowerCase('it-IT').replace(/(^|[\s'’-])([a-zà-ÿ])/g, (_, prefix, letter) => prefix + letter.toLocaleUpperCase('it-IT'))
-  const departmentOrder = ['Portiere', 'Difensore', 'Centrocampista', 'Attaccante']
-  const departmentLabels = { Portiere: 'Portieri', Difensore: 'Difensori', Centrocampista: 'Centrocampisti', Attaccante: 'Attaccanti' }
-  const rosterPlayers = players
-    .filter((player) => player.name !== 'Andrea Giovannini')
-    .map((player) => {
-      const cleanName = titleCaseName(player.name)
-      const parts = cleanName.trim().split(/\s+/)
-      const surname = parts.pop() || ''
-      const firstName = parts.join(' ')
-      return { ...player, canonicalName: cleanName, displayName: `${firstName} ${surname}`.trim(), surname, department: departmentOrder.includes(player.role) ? player.role : 'Difensore' }
-    })
-    .sort((a, b) => a.surname.localeCompare(b.surname, 'it', { sensitivity: 'base' }))
+  const rosterPlayers = getTrainingSheetRosterPlayers()
 
-  const playerOptions = departmentOrder.map((department) => {
+  const playerOptions = TS_DEPARTMENT_ORDER.map((department) => {
     const rows = rosterPlayers.filter((player) => player.department === department).map((player) => `
       <label class="ts-player-option">
-        <input type="checkbox" value="${tsEscapeHtml(player.displayName)}" data-canonical-name="${tsEscapeHtml(player.canonicalName)}">
+        <input type="checkbox" value="${tsEscapeHtml(player.canonicalName)}" data-canonical-name="${tsEscapeHtml(player.canonicalName)}" data-surname="${tsEscapeHtml(player.surname)}">
         <span>${tsEscapeHtml(player.displayName)}</span>
       </label>`).join('')
-    return `<div class="ts-roster-department"><strong>${departmentLabels[department]}</strong>${rows}</div>`
+    return `<div class="ts-roster-department"><strong>${TS_DEPARTMENT_LABELS[department]}</strong>${rows}</div>`
   }).join('')
 
   const editableSheets = calendarEvents
@@ -1074,10 +1227,13 @@ function trainingSheetEditorView() {
           <h1>Training Sheet Editor</h1>
           <p><span>CREAZIONE SEDUTA</span><b>•</b>Compila, controlla l’anteprima e genera il PDF</p>
         </div>
-        <div class="ts-editor-actions">
-          <label class="ts-open-sheet"><span>Apri Training Sheet</span><select data-open-training-sheet><option value="">Seleziona una TS pubblicata</option>${editableSheets}</select></label>
-          <button class="ts-reset-button" type="button" data-reset-training-sheet>Reset editor</button>
-          <div class="ts-draft-state" data-ts-draft-state><i></i><span>Bozza pronta</span></div>
+        <div class="ts-editor-actions-wrap">
+          <div class="ts-editor-actions">
+            <label class="ts-open-sheet"><span>Training Sheet pubblicate</span><select data-open-training-sheet><option value="">Seleziona una TS</option>${editableSheets}</select></label>
+            <button class="ts-open-button" type="button" data-open-training-sheet-button disabled>Apri TS</button>
+            <button class="ts-reset-button" type="button" data-reset-training-sheet>Reset editor</button>
+          </div>
+          <div class="ts-draft-state ts-draft-state--compact" data-ts-draft-state><i></i><span>Bozza pronta</span></div>
         </div>
       </div>
 
@@ -1094,29 +1250,34 @@ function trainingSheetEditorView() {
               <label class="ts-field"><span>Presenti</span><input name="present" type="number" min="0" value="28" readonly aria-readonly="true"><small class="ts-field-help">Calcolati automaticamente dalla Rosa</small></label>
             </div>
 
-            <div class="ts-choice-block"><span class="ts-choice-label">Match Day</span><div class="ts-md-selector" data-ts-md-selector>
+          </section>
+
+          <section class="ts-form-card">
+            <div class="ts-card-head"><span>02</span><div><h2>Match Day e carico</h2><p>Collocazione settimanale e parametri fisici della seduta.</p></div></div>
+            <div class="ts-choice-block ts-match-day-block"><span class="ts-choice-label">Match Day</span><div class="ts-md-selector" data-ts-md-selector>
               ${['MD+1','MD+2','MD+3','MD-3','MD-2','MD-1','MD'].map((md) => `<button type="button" data-md="${md}">${md}</button>`).join('')}
               <input name="match_day" type="hidden">
             </div></div>
 
-            <div class="ts-subsection-title"><span>CARICO</span><small>Focus fisico, intensità e volume</small></div>
             <div class="ts-load-grid">
-              <label class="ts-field"><span>Focus fisico</span><select name="focus"><option value="">Seleziona</option><option>Metabolico</option><option>Forza</option><option>Resistenza alla velocità</option><option>Velocità</option></select></label>
-              <div class="ts-choice-block"><span class="ts-choice-label">Intensità</span><div class="ts-rating" data-rating="intensity">${[1,2,3,4,5].map(n=>`<button type="button" data-value="${n}">${n}</button>`).join('')}<input name="intensity" type="hidden"></div></div>
-              <div class="ts-choice-block"><span class="ts-choice-label">Volume</span><div class="ts-rating" data-rating="volume">${[1,2,3,4,5].map(n=>`<button type="button" data-value="${n}">${n}</button>`).join('')}<input name="volume" type="hidden"></div></div>
+              <label class="ts-field ts-load-focus"><span>Focus fisico</span><select name="focus"><option value="">Seleziona</option><option>Metabolico</option><option>Forza</option><option>Resistenza alla velocità</option><option>Velocità</option></select></label>
+              <div class="ts-choice-block ts-load-intensity"><span class="ts-choice-label">Intensità</span><div class="ts-rating" data-rating="intensity">${[1,2,3,4,5].map(n=>`<button type="button" data-value="${n}">${n}</button>`).join('')}<input name="intensity" type="hidden"></div></div>
+              <div class="ts-choice-block ts-load-volume"><span class="ts-choice-label">Volume</span><div class="ts-rating" data-rating="volume">${[1,2,3,4,5].map(n=>`<button type="button" data-value="${n}">${n}</button>`).join('')}<input name="volume" type="hidden"></div></div>
             </div>
           </section>
 
           <section class="ts-form-card">
-            <div class="ts-card-head"><span>02</span><div><h2>Disponibilità rosa</h2><p>Seleziona più giocatori dall’elenco.</p></div></div>
-            <div class="ts-roster-grid">
+            <div class="ts-card-head"><span>03</span><div><h2>Disponibilità rosa</h2><p>Seleziona più giocatori dall’elenco.</p></div></div>
+            <div class="ts-roster-grid ts-roster-grid--four">
               <details class="ts-multiselect" data-player-select="absent"><summary><span>Assenti</span><b data-count>0 selezionati</b></summary><div class="ts-player-options">${playerOptions}</div></details>
               <details class="ts-multiselect is-injured" data-player-select="injured"><summary><span>Infortunati</span><b data-count>0 selezionati</b></summary><div class="ts-player-options">${playerOptions}</div></details>
+              <details class="ts-multiselect is-differentiated" data-player-select="differentiated"><summary><span>Differenziato</span><b data-count>0 selezionati</b></summary><div class="ts-player-options">${playerOptions}</div></details>
+              <details class="ts-multiselect is-aggregated" data-player-select="aggregated"><summary><span>Aggregati</span><b data-count>0 selezionati</b></summary><div class="ts-player-options">${playerOptions}</div></details>
             </div>
           </section>
 
           <section class="ts-form-card">
-            <div class="ts-card-head"><span>03</span><div><h2>Pilastri</h2><p>Seleziona uno o più riferimenti metodologici.</p></div></div>
+            <div class="ts-card-head"><span>04</span><div><h2>Pilastri</h2><p>Seleziona uno o più riferimenti metodologici.</p></div></div>
             <div class="ts-pillars" data-ts-pillars>
               ${[
                 ['create','Creare il vantaggio'],['keep','Conservare il vantaggio'],['exploit','Sfruttare il vantaggio'],['defend','Difendere il vantaggio']
@@ -1125,13 +1286,13 @@ function trainingSheetEditorView() {
           </section>
 
           <section class="ts-form-card">
-            <div class="ts-card-head"><span>04</span><div><h2>Esercitazioni</h2><p>Descrivi la seduta nell’ordine reale di lavoro.</p></div></div>
+            <div class="ts-card-head"><span>05</span><div><h2>Esercitazioni</h2><p>Descrivi la seduta nell’ordine reale di lavoro.</p></div></div>
             <div class="ts-phases-editor" data-ts-phases></div>
             <button class="ts-add-phase" type="button" data-add-phase>＋ Aggiungi esercitazione</button>
           </section>
 
           <section class="ts-form-card">
-            <div class="ts-card-head"><span>05</span><div><h2>Analisi finale</h2><p>L’analisi propone obiettivo e principi in base alle esercitazioni.</p></div></div>
+            <div class="ts-card-head"><span>06</span><div><h2>Analisi finale</h2><p>L’analisi propone obiettivo e principi in base alle esercitazioni.</p></div></div>
             <button class="ts-ai-button" type="button" data-analyze-exercises>✦ Analizza esercitazioni</button>
             <p class="ts-ai-note" data-ai-note>Nessuna modifica viene pubblicata automaticamente.</p>
             <label class="ts-field ts-field-full"><span>Obiettivo della seduta</span><textarea name="objective" rows="3" placeholder="Verrà proposto dopo l’analisi oppure puoi scriverlo manualmente."></textarea></label>
@@ -1191,6 +1352,153 @@ function trainingSheetResultHtml(result) {
     ${missing}
     <div class="ts-autosave-row" aria-live="polite"><span class="ts-autosave-dot"></span><span data-ts-save-message>Bozza non ancora sincronizzata.</span></div>
   `
+}
+
+
+function matchSheetEditorView() {
+  if (!isOwner()) {
+    return `<section class="placeholder"><h1>Match Sheet Editor</h1><p>Accesso riservato all’amministratore.</p></section>`
+  }
+
+  const formations = COMMON_FORMATIONS
+  const team = getTeamProfile()
+  const rosterOptions = getTrainingSheetRosterPlayers()
+    .map((player) => `<option value="${escapeHtml(player.canonicalName)}">${escapeHtml(player.surname)} ${escapeHtml(player.firstName)}</option>`)
+    .join('')
+  const compactPreview = (step) => `<aside class="match-inline-report" data-match-inline-preview="${step}"><span>ANTEPRIMA REPORT</span><div><strong>Compila la sezione</strong><span>La sintesi apparirà qui in tempo reale.</span></div></aside>`
+
+  return `
+    <section class="match-editor" data-match-editor>
+      <div class="page-head match-page-head">
+        <div><h1>Match Sheet Editor</h1><p><span>REPORT PARTITA</span><b>•</b> Formazione, eventi, avversario e memoria tecnica</p></div>
+        <div class="match-head-tools"><button class="ts-reset-button match-reset-button" type="button" data-match-reset>Reset editor</button><span class="ts-draft-state ts-draft-state--compact"><i></i><span data-match-save-state>Bozza pronta</span></span></div>
+      </div>
+
+      <nav class="match-step-nav match-step-nav--five" aria-label="Sezioni Match Sheet">
+        ${['Dati gara',team.shortName || 'Propria squadra','Avversario','Eventi e note','Report'].map((label,i)=>`<button type="button" class="${i===0?'is-active':''}" data-match-step-button="${i+1}"><b>${String(i+1).padStart(2,'0')}</b><span>${label}</span></button>`).join('')}
+      </nav>
+
+      <form data-match-form>
+        <section class="match-step is-active" data-match-step="1">
+          <header class="section-title"><span>01</span><div><h2>Dati gara</h2><p>Informazioni ufficiali e risultato.</p></div></header>
+          <div class="match-form-grid three match-game-data-grid">
+            <label><span>Data</span><div class="match-input-with-icon"><i aria-hidden="true">▣</i><input type="date" name="date" required></div></label>
+            <label><span>Ora</span><div class="match-input-with-icon"><i aria-hidden="true">◷</i><input type="time" name="time" value="15:30"></div></label>
+            <label><span>Competizione</span><div class="match-input-with-icon"><i aria-hidden="true">★</i><select name="competition"><option>Campionato</option><option>Coppa</option><option>Amichevole</option></select></div></label>
+            <label><span>Avversario</span><div class="match-input-with-icon"><i aria-hidden="true">VS</i><input name="opponent" value="Da definire" required></div></label>
+            <label><span>Casa / Trasferta</span><div class="match-input-with-icon"><i aria-hidden="true">⌂</i><select name="venue"><option>Casa</option><option>Trasferta</option><option>Campo neutro</option></select></div></label>
+            <label><span>Campo</span><div class="match-input-with-icon"><i aria-hidden="true">⌖</i><input name="location" placeholder="Impianto sportivo"></div></label>
+            ${scoreFieldsHtml('result','Risultato finale')}
+            ${scoreFieldsHtml('half_result','Risultato 1° tempo')}
+            <label><span>Giornata / turno</span><div class="match-input-with-icon"><i aria-hidden="true">#</i><input name="round" placeholder="Es. 12ª giornata"></div></label>
+          </div>
+          ${compactPreview(1)}
+        </section>
+
+        <section class="match-step" data-match-step="2">
+          <header class="section-title"><span>02</span><div><h2>${escapeHtml(team.shortName || 'Propria squadra')}</h2><p>Sistema di gioco, undici iniziale e valutazione tecnica.</p></div></header>
+          <div class="formation-toolbar formation-toolbar--pro">
+            <div class="formation-primary-row"><label><span>Sistema di gioco</span><select name="formation">${formationOptionsHtml('4-4-2')}</select></label><label data-custom-formation hidden><span>Sistema personalizzato</span><input name="custom_formation" placeholder="Es. 3-2-4-1" inputmode="numeric"></label></div>
+            <div class="formation-secondary-row"><fieldset class="token-display-options"><legend>Contenuto pedine</legend><label><input type="checkbox" name="token_number" checked> Numero</label><label><input type="checkbox" name="token_surname" checked> Cognome</label><label><input type="checkbox" name="token_photo"> Foto</label></fieldset><button class="portal-action-button portal-action-button--secondary formation-reset-button" type="button" data-reset-formation><span aria-hidden="true">↺</span> Azzera posizioni</button></div>
+          </div>
+          <div class="match-lineup-layout"><div class="football-pitch" data-football-pitch aria-label="Campo formazione"><div class="pitch-markings"><i></i><i></i><i></i><span class="pitch-goal pitch-goal-top"></span><span class="pitch-goal pitch-goal-bottom"></span></div>${Array.from({length:11},(_,i)=>`<button class="player-token token-${i+1}" type="button" data-player-token="${i}" style="--x:50;--y:${88-i*7}" aria-label="Sposta giocatore ${i+1}"><span class="token-photo">${i+1}</span><small>Giocatore ${i+1}</small></button><input type="hidden" name="position_x_${i}" value="50"><input type="hidden" name="position_y_${i}" value="${88-i*7}">`).join('')}</div><div class="lineup-list"><div class="lineup-list-head"><h3>Undici iniziale</h3><label class="captain-select"><span>Capitano</span><select name="captain"><option value="">Seleziona il capitano</option>${Array.from({length:11},(_,i)=>`<option value="${i}">Pedina ${i+1}</option>`).join('')}</select></label></div>${[1,3,5,6,2,4,8,11,10,7,9].map((shirtNumber,i)=>`<div class="lineup-row"><span class="lineup-index">${String(i+1).padStart(2,'0')}</span><input type="number" min="1" max="99" name="starter_number_${i}" value="${shirtNumber}" aria-label="Numero di maglia"><select name="starter_${i}"><option value="">Seleziona giocatore</option>${rosterOptions}</select></div>`).join('')}</div></div>
+          <div class="bench-block"><div class="bench-block-head"><div><span>PANCHINA</span><h3>A disposizione</h3></div><small>Numero di maglia e giocatore</small></div><div class="bench-grid">${Array.from({length:9},(_,i)=>`<div class="bench-row"><label><span>N°</span><input type="number" min="1" max="99" name="bench_number_${i}" placeholder="—"></label><label><span>Giocatore</span><select name="bench_${i}"><option value="">Seleziona</option>${rosterOptions}</select></label></div>`).join('')}</div></div>
+          <div class="section-insight-grid"><label><span>Punti di forza propri</span><textarea name="own_strengths" rows="4"></textarea></label><label><span>Criticità proprie</span><textarea name="own_issues" rows="4"></textarea></label></div>
+          ${compactPreview(2)}
+        </section>
+
+        <section class="match-step" data-match-step="3">
+          <header class="section-title"><span>03</span><div><h2>Squadra avversaria</h2><p>Distinta, sistemi utilizzati e analisi per fase di gioco.</p></div></header>
+          <div class="opponent-top-grid opponent-top-grid--visual"><label class="upload-card"><span>Foto distinta avversaria</span><input type="file" name="opponent_sheet" accept="image/*" capture="environment"><b>Scatta o carica foto</b><img data-opponent-sheet-preview hidden alt="Anteprima distinta"></label><div class="opponent-visual-panel"><div class="opponent-panel-head"><div><h3>Disposizione avversaria</h3><p>Seleziona il sistema e sposta liberamente le pedine.</p></div></div><div class="opponent-football-pitch" data-opponent-pitch><div class="pitch-markings"><span class="pitch-goal pitch-goal-top"></span><span class="pitch-goal pitch-goal-bottom"></span></div>${Array.from({length:11},(_,i)=>`<button type="button" class="opponent-token" data-opponent-token="${i}" style="--x:50;--y:${88-i*7}" aria-label="Sposta giocatore avversario ${i+1}">${i+1}</button><input type="hidden" name="opponent_position_x_${i}" value="50"><input type="hidden" name="opponent_position_y_${i}" value="${88-i*7}">`).join('')}</div></div></div>
+          <div class="opponent-token-style">
+            <div><h3>Stile pedine avversarie</h3><p>Personalizza colori e maglia per riconoscere subito la squadra.</p></div>
+            <label><span>Colore interno</span><input type="color" name="opponent_token_primary" value="#9f1239"></label>
+            <label><span>Colore bordo / secondo colore</span><input type="color" name="opponent_token_secondary" value="#f8fafc"></label>
+            <label><span>Stile</span><select name="opponent_token_pattern"><option value="solid">Tinta unita</option><option value="vertical">Strisce verticali</option><option value="horizontal">Strisce orizzontali</option></select></label>
+          </div>
+          <div class="opponent-formations-panel opponent-formations-panel--full"><div class="opponent-panel-head"><div><h3>Sistemi di gioco avversari</h3><p>Sistema iniziale ed eventuali variazioni.</p></div></div><div class="opponent-formations-list" data-opponent-formations></div><button class="portal-action-button portal-action-button--secondary opponent-add-system-button" type="button" data-add-opponent-formation><span aria-hidden="true">＋</span> Aggiungi cambio sistema</button></div>
+          <div class="opponent-phase-columns"><article><h3>Fase di possesso</h3>${['Costruzione da rimessa','Costruzione media','Sviluppo e rifinitura','Finalizzazione','Transizione positiva'].map((label,i)=>`<label><span>${label}</span><textarea name="opponent_possession_note_${i}" rows="4"></textarea></label>`).join('')}</article><article><h3>Fase di non possesso</h3>${['Prima pressione','Blocco medio','Blocco basso','Transizione negativa'].map((label,i)=>`<label><span>${label}</span><textarea name="opponent_nonpossession_note_${i}" rows="4"></textarea></label>`).join('')}</article></div>
+          <section class="set-pieces-analysis"><div class="set-pieces-title"><div><h3>Palle inattive avversarie</h3><p>Struttura, battitore, traiettoria e zona di attacco.</p></div></div><div class="set-pieces-grid"><article><h4>Calci d’angolo</h4><textarea name="opponent_corners" rows="5"></textarea></article><article><h4>Punizioni laterali</h4><textarea name="opponent_wide_free_kicks" rows="5"></textarea></article></div><div class="penalty-analysis"><label class="penalty-toggle"><input type="checkbox" name="opponent_penalty_taken"> <span>Rigore battuto</span></label><label><span>Esito</span><select name="opponent_penalty_result"><option value="">Da definire</option><option>Gol</option><option>Parato</option><option>Fuori</option><option>Palo / traversa</option></select></label><label><span>Direzione</span><select name="opponent_penalty_direction"><option value="">Da definire</option><option>Sinistra portiere</option><option>Centro</option><option>Destra portiere</option></select></label><label class="penalty-note"><span>Dettagli</span><input name="opponent_penalty_note"></label></div></section>
+          <div class="section-insight-grid section-insight-grid--three"><label><span>Punti di forza avversari</span><textarea name="opp_strengths" rows="4"></textarea></label><label><span>Punti deboli avversari</span><textarea name="opp_weaknesses" rows="4"></textarea></label><label><span>Indicazioni per il ritorno</span><textarea name="return_notes" rows="4"></textarea></label></div>
+          ${compactPreview(3)}
+        </section>
+
+        <section class="match-step" data-match-step="4">
+          <header class="section-title"><span>04</span><div><h2>Eventi e note</h2><p>Minuti, sostituzioni, gol, sanzioni e lettura della partita.</p></div></header>
+          <div class="match-events-grid match-events-grid--dynamic"><article class="match-event-card"><div class="match-event-card-head"><div><span>CAMBI</span><h3>Sostituzioni</h3></div><button class="icon-add-button" type="button" data-add-match-row="substitution">＋</button></div><div data-substitutions></div></article><article class="match-event-card"><div class="match-event-card-head"><div><span>RETE</span><h3>Marcatori e assist</h3></div><button class="icon-add-button" type="button" data-add-match-row="goal">＋</button></div><div data-goals></div></article><article class="match-event-card"><div class="match-event-card-head"><div><span>DISCIPLINA</span><h3>Sanzioni</h3></div><button class="icon-add-button" type="button" data-add-match-row="card">＋</button></div><div data-cards></div></article></div>
+          <div class="notes-mode"><label><span>Struttura note</span><select name="notes_mode"><option value="free">Campo unico</option><option value="halves">Due tempi</option><option value="quarters">Intervalli da 15 minuti</option></select></label></div><div data-note-fields></div>
+          ${compactPreview(4)}
+        </section>
+
+        <section class="match-step" data-match-step="5">
+          <header class="section-title"><span>05</span><div><h2>Report finale</h2><p>Documento completo per archivio e partita di ritorno.</p></div></header><div class="match-report-preview" data-match-report-preview></div>
+        </section>
+
+        <footer class="match-form-footer"><button type="button" class="portal-action-button portal-action-button--secondary" data-match-prev disabled><span aria-hidden="true">←</span> Indietro</button><span data-match-progress>Passaggio 1 di 5</span><button type="button" class="portal-action-button portal-action-button--primary" data-match-next>Continua <span aria-hidden="true">→</span></button><button type="button" class="portal-action-button portal-action-button--primary" data-match-pdf hidden>Crea report PDF</button></footer>
+      </form>
+    </section>`
+}
+
+
+function boardView() {
+  const team = getTeamProfile()
+  const makeTokens = (side) => Array.from({ length: 11 }, (_, index) => `
+    <button type="button" class="board-token board-token--${side}" data-board-token="${side}-${index}" style="--x:50;--y:${88-index*7}">
+      <b>${index + 1}</b><small>${side === 'home' ? escapeHtml(team.shortName) : 'Avversari'}</small>
+    </button>
+    <input type="hidden" name="${side}_x_${index}" value="50">
+    <input type="hidden" name="${side}_y_${index}" value="${88-index*7}">
+  `).join('')
+  return `<section class="view page-view board-view" data-board-view>
+    <div class="page-head"><div><h1>Board</h1><p><span>LAVAGNA TATTICA</span><b>•</b>Due squadre, pedine libere e sistemi modificabili</p></div><button type="button" class="ghost-button" data-board-reset>Reset board</button></div>
+    <div class="board-toolbar">
+      <label><span>${escapeHtml(team.shortName)}</span><select name="board_home_formation">${formationOptionsHtml('4-3-3')}</select></label>
+      <label><span>Avversari</span><select name="board_away_formation">${formationOptionsHtml('4-4-2')}</select></label>
+      <div class="board-color-controls">
+        <label><span>Colore nostri</span><input type="color" name="board_home_color" value="${escapeHtml(team.primaryColor)}"></label>
+        <label><span>Colore avversari</span><input type="color" name="board_away_color" value="#9f1239"></label>
+      </div>
+    </div>
+    <div class="board-pitch" data-board-pitch>
+      <div class="pitch-markings"><span class="pitch-goal pitch-goal-top"></span><span class="pitch-goal pitch-goal-bottom"></span></div>
+      ${makeTokens('home')}${makeTokens('away')}
+    </div>
+    <p class="board-help">Trascina liberamente le pedine con mouse o dito. Le posizioni vengono salvate su questo dispositivo.</p>
+  </section>`
+}
+
+function teamSettingsView() {
+  if (!isOwner()) return `<section class="placeholder"><h1>Identità squadra</h1><p>Accesso riservato all’amministratore.</p></section>`
+  const team = getTeamProfile()
+  return `<section class="view page-view team-settings-view">
+    <div class="page-head"><div><h1>Identità squadra</h1><p><span>CONFIGURAZIONE PORTALE</span><b>•</b>Brand, colori e maglia</p></div></div>
+    <form class="team-settings-card" data-team-settings-form>
+      <div class="team-brand-preview" data-team-brand-preview style="--team-primary:${escapeHtml(team.primaryColor)};--team-secondary:${escapeHtml(team.secondaryColor)}">
+        ${teamLogoHtml('team-brand-preview-logo')}
+        <div><strong>${escapeHtml(team.name)}</strong><span>${escapeHtml(team.category)} · ${escapeHtml(team.season)}</span></div>
+      </div>
+      <div class="team-settings-grid">
+        <label><span>Nome completo squadra</span><input name="name" value="${escapeHtml(team.name)}" required></label>
+        <label><span>Nome breve</span><input name="shortName" value="${escapeHtml(team.shortName)}" required maxlength="24"></label>
+        <label><span>Stagione</span><input name="season" value="${escapeHtml(team.season)}"></label>
+        <label><span>Categoria</span><input name="category" value="${escapeHtml(team.category)}"></label>
+        <fieldset class="team-color-field" data-team-color-field="primaryColor"><legend>Colore principale</legend><div class="team-color-palette">${['#07194f','#1f93e5','#dc2626','#facc15','#16a34a','#ffffff','#111827','#f97316','#7c3aed'].map((color)=>`<button type="button" class="team-color-swatch" data-team-color-value="${color}" style="--swatch:${color}" aria-label="Scegli ${color}"></button>`).join('')}<label class="team-color-custom"><span>Personalizzato</span><input type="color" name="primaryColor" value="${escapeHtml(team.primaryColor)}"></label></div></fieldset>
+        <fieldset class="team-color-field" data-team-color-field="secondaryColor"><legend>Colore secondario</legend><div class="team-color-palette">${['#07194f','#1f93e5','#dc2626','#facc15','#16a34a','#ffffff','#111827','#f97316','#7c3aed'].map((color)=>`<button type="button" class="team-color-swatch" data-team-color-value="${color}" style="--swatch:${color}" aria-label="Scegli ${color}"></button>`).join('')}<label class="team-color-custom"><span>Personalizzato</span><input type="color" name="secondaryColor" value="${escapeHtml(team.secondaryColor)}"></label></div></fieldset>
+        <div class="team-kit-row">
+          <label><span>Stile maglia</span><select name="kitPattern"><option value="solid" ${team.kitPattern==='solid'?'selected':''}>Tinta unita</option><option value="vertical" ${team.kitPattern==='vertical'?'selected':''}>Strisce verticali</option><option value="horizontal" ${team.kitPattern==='horizontal'?'selected':''}>Strisce orizzontali</option></select></label>
+          <div class="team-token-preview-card" data-team-token-preview aria-label="Anteprima stile maglia" aria-live="polite">
+            <div class="team-token-preview team-token-preview--${escapeHtml(team.kitPattern)}" style="--token-primary:${escapeHtml(team.primaryColor)};--token-secondary:${escapeHtml(team.secondaryColor)}">
+              <b>10</b>
+            </div>
+          </div>
+        </div>
+        <label class="team-logo-upload"><span>Logo squadra</span><input type="file" name="logoFile" accept="image/png,image/jpeg,image/webp"><small>PNG, JPG o WebP. Massimo 2 MB.</small></label>
+      </div>
+      <input type="hidden" name="logo" value="${escapeHtml(team.logo)}">
+      <p class="form-message" data-team-settings-message></p>
+      <div class="team-settings-actions"><button type="button" class="ghost-button" data-team-logo-remove>Rimuovi logo</button><button type="submit" class="primary-action">Salva identità squadra</button></div>
+    </form>
+  </section>`
 }
 
 function placeholderView(title) {
@@ -1298,6 +1606,11 @@ function settingsView() {
             <b>→</b>
           </button>
         ` : ''}
+        ${isOwner() ? `<button class="settings-card" type="button" data-open-team-settings>
+          <span class="settings-card-icon">${icon('settings')}</span>
+          <span><strong>Identità squadra</strong><small>Nome, logo, colori e stile maglia.</small></span>
+          <b>→</b>
+        </button>` : ''}
         <button class="settings-card" type="button" data-open-profile>
           <span class="settings-card-icon">${icon('settings')}</span>
           <span><strong>Il mio profilo</strong><small>Nome, cognome e password personale.</small></span>
@@ -1313,56 +1626,77 @@ function staffManagementView() {
     return `
       <section class="view page-view">
         <div class="page-head"><div><h1>Impostazioni</h1></div></div>
-        <div class="placeholder-panel"><h2>Accesso riservato</h2><p>Solo l'amministratore può gestire lo staff.</p></div>
+        <div class="placeholder-panel"><h2>Accesso riservato</h2><p>Solo Proprietario e Amministratore possono gestire lo staff.</p></div>
       </section>
     `
   }
 
+  const teamOwnerId = getTeamProfile().ownerId || null
   const rows = staffProfiles.map((profile) => {
     const name = [profile.first_name, profile.last_name].filter(Boolean).join(' ')
+    const isTeamOwner = profile.id === teamOwnerId || profile.app_role === 'owner'
+    const canDelete = !isTeamOwner && profile.id !== currentUser?.id
+    const ownerLocked = isTeamOwner && profile.id !== currentUser?.id
+    const level = isTeamOwner ? 'owner' : (profile.app_role || 'collaborator')
     return `
-      <form class="staff-member-card" data-staff-form data-user-id="${profile.id}">
+      <form class="staff-member-card" data-staff-form data-user-id="${profile.id}" data-is-owner="${isTeamOwner}">
         <div class="staff-member-avatar">${(profile.first_name || profile.email || 'U').charAt(0).toUpperCase()}</div>
         <div class="staff-member-fields">
-          <label class="form-field"><span>Nome</span><input name="first_name" value="${profile.first_name || ''}" required></label>
-          <label class="form-field"><span>Cognome</span><input name="last_name" value="${profile.last_name || ''}" required></label>
-          <label class="form-field staff-email-field"><span>Email</span><input value="${profile.email || ''}" disabled></label>
-          <label class="form-field"><span>Ruolo</span>
-            <select name="role">
-              ${[
-                ['owner','Amministratore'], ['coach','Allenatore'], ['assistant','Vice allenatore'],
-                ['athletic_coach','Preparatore fisico'], ['goalkeeper_coach','Preparatore portieri'],
-                ['analyst','Match analyst'], ['observer','Osservatore'], ['physio','Fisioterapista'],
-                ['collaborator','Collaboratore'], ['sporting_director','Direttore sportivo'],
-                ['read_only','Solo lettura'],
-              ].map(([value,label]) => `<option value="${value}" ${profile.role === value ? 'selected' : ''}>${label}</option>`).join('')}
-            </select>
-          </label>
-          <label class="staff-active-toggle"><input name="active" type="checkbox" ${profile.active !== false ? 'checked' : ''}><span>Account attivo</span></label>
+          <label class="form-field"><span>Nome</span><input name="first_name" value="${escapeHtml(profile.first_name || '')}" required ${ownerLocked ? 'disabled' : ''}></label>
+          <label class="form-field"><span>Cognome</span><input name="last_name" value="${escapeHtml(profile.last_name || '')}" required ${ownerLocked ? 'disabled' : ''}></label>
+          <label class="form-field staff-email-field"><span>Email</span><input value="${escapeHtml(profile.email || '')}" disabled></label>
+          <label class="form-field"><span>Ruolo nello staff tecnico</span><select name="role" ${ownerLocked ? 'disabled' : ''}>${technicalRoleOptions(profile.role)}</select></label>
+          <label class="form-field"><span>Livello di accesso</span><select name="app_role" ${isTeamOwner ? 'disabled' : ''}>${appRoleOptions(level, { includeOwner: isTeamOwner })}</select></label>
+          <label class="staff-active-toggle"><input name="active" type="checkbox" ${profile.active !== false ? 'checked' : ''} ${isTeamOwner ? 'disabled' : ''}><span>Account attivo</span></label>
         </div>
         <div class="staff-member-actions">
-          <span class="staff-member-name">${name || 'Nome da completare'}</span>
+          <span class="staff-member-name">${escapeHtml(name || 'Nome da completare')}</span>
+          <span class="staff-access-badge staff-access-badge--${level}">${level === 'owner' ? 'Proprietario' : level === 'admin' ? 'Amministratore' : level === 'read_only' ? 'Solo lettura' : 'Collaboratore'}</span>
           <p class="form-message" data-staff-message></p>
-          <button class="primary-action" type="submit">Salva</button>
+          <div class="staff-member-action-row">
+            ${canDelete ? '<button class="danger-button" type="button" data-delete-staff-user>Elimina utente</button>' : ''}
+            ${ownerLocked ? '' : '<button class="primary-action" type="submit">Salva</button>'}
+          </div>
         </div>
       </form>
     `
   }).join('')
 
   return `
-    <section class="view page-view">
-      <div class="page-head">
-        <div><h1>Gestione Staff</h1><p><span>AMMINISTRAZIONE</span><b>•</b>Nomi, ruoli e accessi</p></div>
+    <section class="view page-view staff-management-view">
+      <div class="page-head staff-page-head">
+        <div><h1>Gestione Staff</h1><p><span>AMMINISTRAZIONE</span><b>•</b>Ruoli tecnici, permessi e accessi</p></div>
+        <button type="button" class="primary-action" data-toggle-create-staff aria-expanded="false">＋ Nuovo utente</button>
       </div>
-      <div class="staff-management-note">
-        <strong>Nuovi account</strong>
-        <span>Per ora crea l'utente in Supabase Authentication. Comparirà qui automaticamente e potrai completare nome, cognome e ruolo.</span>
+
+      <div class="staff-management-note staff-management-note--compact">
+        <span aria-hidden="true">ⓘ</span>
+        <p>Gli utenti vengono creati in modo sicuro dal portale e associati automaticamente alla squadra.</p>
       </div>
+
+      ${staffFlashMessage ? `<p class="staff-flash-message is-success">${escapeHtml(staffFlashMessage)}</p>` : ''}
+
+      <form class="staff-create-card" data-create-staff-form hidden>
+        <div class="staff-create-heading">
+          <div><span>NUOVO ACCESSO</span><h2>Crea utente staff</h2><p>Imposta ruolo tecnico, permessi e password temporanea.</p></div>
+          <button type="button" class="icon-button" data-close-create-staff aria-label="Chiudi">×</button>
+        </div>
+        <div class="staff-create-grid">
+          <label class="form-field"><span>Nome</span><input name="first_name" autocomplete="given-name" required maxlength="80"></label>
+          <label class="form-field"><span>Cognome</span><input name="last_name" autocomplete="family-name" required maxlength="80"></label>
+          <label class="form-field staff-create-email"><span>Email</span><input name="email" type="email" autocomplete="email" required></label>
+          <label class="form-field"><span>Ruolo nello staff tecnico</span><select name="role">${technicalRoleOptions('observer')}</select></label>
+          <label class="form-field"><span>Livello di accesso</span><select name="app_role">${appRoleOptions('collaborator')}</select></label>
+          <label class="form-field staff-password-field"><span>Password temporanea</span><div class="staff-password-control"><input name="password" type="text" minlength="10" autocomplete="new-password" required><button type="button" class="secondary-button" data-generate-staff-password>Genera</button></div><small>Almeno 10 caratteri. Consegnala direttamente all’utente.</small></label>
+        </div>
+        <p class="form-message" data-create-staff-message></p>
+        <div class="staff-create-actions"><button type="button" class="secondary-button" data-cancel-create-staff>Annulla</button><button type="submit" class="primary-action">Crea utente</button></div>
+      </form>
+
       <div class="staff-list">${rows || '<div class="placeholder-panel"><p>Nessun profilo disponibile.</p></div>'}</div>
     </section>
   `
 }
-
 function trainingSheetPreviewHtml(event) {
   if (!event.trainingSheetUrl) {
     return '<small>Nessuna Training Sheet collegata.</small>'
@@ -1417,6 +1751,7 @@ function playerProfileModalHtml(player) {
       <section class="new-event-modal player-profile-modal" role="dialog" aria-modal="true" aria-labelledby="playerProfileTitle">
         <div class="new-event-modal__head"><div><span>SCHEDA GIOCATORE</span><h2 id="playerProfileTitle">${escapeHtml(player.name)}</h2></div><button type="button" class="new-event-modal__close" data-close-player-profile>${icon('close')}</button></div>
         <form class="player-profile-form" data-player-profile-form data-player-key="${key}">
+          <div class="player-profile-scroll">
           <div class="player-profile-grid">
             <label class="form-field"><span>Nome e cognome</span><input name="full_name" value="${escapeHtml(saved.full_name || player.name)}" required></label>
             <label class="form-field"><span>Ruolo</span><select name="role">${['Portiere','Difensore','Centrocampista','Attaccante'].map(role=>`<option ${role===(saved.role||player.role)?'selected':''}>${role}</option>`).join('')}</select></label>
@@ -1432,7 +1767,8 @@ function playerProfileModalHtml(player) {
             <label class="form-field"><span>Note infortuni</span><textarea name="injury_notes" rows="4">${escapeHtml(saved.injury_notes || '')}</textarea></label>
           </div>
           <p class="form-message" data-player-profile-message></p>
-          <div class="modal-actions"><button type="button" class="ghost-button" data-close-player-profile>Annulla</button><button type="submit" class="primary-action">Salva scheda</button></div>
+          </div>
+          <div class="modal-actions player-profile-actions"><button type="button" class="ghost-button" data-close-player-profile>Annulla</button><button type="submit" class="primary-action">Salva scheda</button></div>
         </form>
       </section>
     </div>`
@@ -1603,31 +1939,32 @@ function newEventModalHtml(selectedDate = formatDateInputValue(new Date())) {
             </label>
           </div>
 
-          <div class="new-event-form__row">
-            <label>
-              Data
-              <input name="date" type="date" value="${today}" required>
-            </label>
+          <div data-standard-event-fields>
+            <div class="new-event-form__row">
+              <label>
+                Data
+                <input name="date" type="date" value="${today}" required>
+              </label>
+
+              <label>
+                Ora
+                <input name="time" type="time" value="17:30" required>
+              </label>
+            </div>
 
             <label>
-              Ora
-              <input name="time" type="time" value="17:30" required>
+              Campo
+              <select name="location" required>
+                <option value="Mezzolara">Mezzolara</option>
+                <option value="Budrio">Budrio</option>
+                <option value="__custom__">Altro campo…</option>
+              </select>
             </label>
-          </div>
 
-          <label>
-            Campo
-            <select name="location" required>
-              <option value="Mezzolara">Mezzolara</option>
-              <option value="Budrio">Budrio</option>
-              <option value="__custom__">Altro campo…</option>
-            </select>
-          </label>
-
-          <label data-custom-location hidden>
-            Nome campo / impianto
-            <input name="customLocation" type="text" maxlength="100" autocomplete="off" placeholder="Scrivi il nome del campo">
-          </label>
+            <label data-custom-location hidden>
+              Nome campo / impianto
+              <input name="customLocation" type="text" maxlength="100" autocomplete="off" placeholder="Scrivi il nome del campo">
+            </label>
 
           <label data-md-field>
             MD
@@ -1653,6 +1990,13 @@ function newEventModalHtml(selectedDate = formatDateInputValue(new Date())) {
             <small>
               Facoltativa. Puoi allegarla subito oppure aggiungerla in seguito.
             </small>
+          </label>
+
+          </div>
+
+          <label data-rest-fields hidden>
+            Note riposo
+            <textarea name="restNote" rows="7" maxlength="1200" placeholder="Motivo, indicazioni o comunicazioni per la giornata di riposo"></textarea>
           </label>
 
           <p
@@ -1691,6 +2035,9 @@ function editEventModalHtml(event) {
     hour: '2-digit',
     minute: '2-digit',
   })
+  const restNote = (() => {
+    try { return JSON.parse(event.rawNotes || '{}')?.rest_note || '' } catch { return '' }
+  })()
 
   return `
     <div class="new-event-modal-backdrop" data-close-new-event>
@@ -1752,6 +2099,7 @@ function editEventModalHtml(event) {
             </label>
           </div>
 
+          <div data-standard-event-fields>
           <div class="new-event-form__row">
             <label>
               Data
@@ -1805,6 +2153,13 @@ function editEventModalHtml(event) {
             <small>
               Lascia vuoto per mantenere il file attuale.
             </small>
+          </label>
+
+          </div>
+
+          <label data-rest-fields ${event.type === 'rest' ? '' : 'hidden'}>
+            Note riposo
+            <textarea name="restNote" rows="7" maxlength="1200" placeholder="Motivo, indicazioni o comunicazioni per la giornata di riposo">${escapeHtml(restNote)}</textarea>
           </label>
 
           <p
@@ -1916,6 +2271,11 @@ function profileMenuHtml(userInitial, userEmail, userName, roleLabel) {
   `
 }
 
+export async function prepareAppData(user) {
+  currentUser = user
+  await loadTeamProfile(user)
+}
+
 export function renderApp(user) {
   currentUser = user
   const userEmail = user.email ?? ''
@@ -1938,18 +2298,16 @@ export function renderApp(user) {
   const userName = knownProfile?.name || user.user_metadata?.full_name || user.user_metadata?.name || fallbackUserName || 'Utente'
   const currentRoleLabel = knownProfile?.role || 'Staff'
   const userInitial = userName.charAt(0).toUpperCase() || 'N'
+  const team = getTeamProfile()
 
   return `
     <div class="app-shell">
       <aside class="sidebar">
         <div class="sidebar-brand">
-          <div class="brand-square">
-            NZ
-          </div>
-
+          ${teamLogoHtml('brand-square team-brand-logo')}
           <div>
-            <strong>NICOLA ZECCHI</strong>
-            <span>STAFF</span>
+            <strong>${escapeHtml(team.shortName || team.name)}</strong>
+            <span>${escapeHtml(team.category || 'STAFF')}</span>
           </div>
         </div>
 
@@ -1962,13 +2320,10 @@ export function renderApp(user) {
       <div class="workspace">
         <header class="topbar">
           <div class="mobile-topbar-brand">
-            <span class="mobile-brand-square">
-              NZ
-            </span>
-
+            ${teamLogoHtml('mobile-brand-square team-brand-logo')}
             <div>
-              <strong>NICOLA ZECCHI</strong>
-              <span>STAFF</span>
+              <strong>${escapeHtml(team.shortName || team.name)}</strong>
+              <span>${escapeHtml(team.category || 'STAFF')}</span>
             </div>
           </div>
 
@@ -2021,6 +2376,7 @@ function parseItalianDate(value) {
 
 export async function attachAppEvents(user) {
   currentUser = user
+  await loadTeamProfile(user)
   await loadCurrentUserRole(user)
   syncProfileHeader()
   await loadCalendarEvents()
@@ -2056,7 +2412,7 @@ export async function attachAppEvents(user) {
   document.body.classList.remove('drawer-open', 'new-event-modal-open')
   document.body.style.removeProperty('overflow')
 
-  if (key === 'calendar' || key === 'dashboard' || key === 'library' || key === 'training-sheet') {
+  if (key === 'calendar' || key === 'dashboard' || key === 'library' || key === 'training-sheet' || key === 'match-sheet') {
     await loadCalendarEvents()
   }
 
@@ -2076,12 +2432,15 @@ export async function attachAppEvents(user) {
     dashboard: dashboardView,
     calendar: calendarView,
     'training-sheet': trainingSheetEditorView,
+    'match-sheet': matchSheetEditorView,
+    board: boardView,
     library: trainingLibraryView,
     squad: squadView,
     analysis: analysisView,
     profile: profileView,
     settings: settingsView,
     staff: staffManagementView,
+    'team-settings': teamSettingsView,
   }
 
   root.innerHTML = views[key]
@@ -2118,6 +2477,8 @@ export async function attachAppEvents(user) {
     const locationSelect = form?.querySelector('[name="location"]')
     const customLocationField = form?.querySelector('[data-custom-location]')
     const customLocationInput = form?.querySelector('[name="customLocation"]')
+    const standardFields = form?.querySelector('[data-standard-event-fields]')
+    const restFields = form?.querySelector('[data-rest-fields]')
 
     if (!typeSelect || !trainingSheetField) return
 
@@ -2131,13 +2492,20 @@ export async function attachAppEvents(user) {
     }
 
     const refresh = () => {
+      const isRest = typeSelect.value === 'rest'
+      if (standardFields) standardFields.hidden = isRest
+      if (restFields) restFields.hidden = !isRest
       const showTrainingSheet = isTrainingEventType(typeSelect.value)
       trainingSheetField.hidden = !showTrainingSheet
       if (mdField) mdField.hidden = !showTrainingSheet
       const showMatchType = typeSelect.value === 'match'
       if (matchFields) matchFields.hidden = !showMatchType
       if (!showMatchType && matchTypeSelect) matchTypeSelect.value = 'friendly'
-      if (!showMatchType && opponentInput) opponentInput.value = ''
+      if (!showMatchType && opponentInput) {
+        opponentInput.value = ''
+      } else if (showMatchType && opponentInput && !opponentInput.value.trim()) {
+        opponentInput.value = 'Da definire'
+      }
 
       if (!showTrainingSheet && trainingSheetInput) {
         trainingSheetInput.value = ''
@@ -2146,6 +2514,8 @@ export async function attachAppEvents(user) {
       if (!showTrainingSheet && mdSelect) {
         mdSelect.value = ''
       }
+      if (locationSelect) locationSelect.required = !isRest
+      if (customLocationInput && isRest) customLocationInput.required = false
     }
 
     typeSelect.addEventListener('change', refresh)
@@ -2213,7 +2583,7 @@ export async function attachAppEvents(user) {
       const time = formData.get('time')
       const locationChoice = String(formData.get('location') ?? '').trim()
       const customLocation = String(formData.get('customLocation') ?? '').trim()
-      const location = locationChoice === '__custom__' ? customLocation : locationChoice
+      const location = eventType === 'rest' ? '' : (locationChoice === '__custom__' ? customLocation : locationChoice)
       const file = formData.get('trainingSheet')
       const matchType = eventType === 'match' ? String(formData.get('matchType') || 'friendly') : null
       const opponent = eventType === 'match' ? String(formData.get('opponent') || '').trim() : ''
@@ -2222,14 +2592,15 @@ export async function attachAppEvents(user) {
         : null
       const presentCount = null
       const squadTotal = null
+      const restNote = eventType === 'rest' ? String(formData.get('restNote') || '').trim() : ''
 
       if (eventType === 'match' && !opponent) {
         message.textContent = 'Inserisci il nome della squadra avversaria.'
         return
       }
 
-      if (!date || !time || !location) {
-        message.textContent = 'Inserisci data, ora e campo.'
+      if (!date || !time || (eventType !== 'rest' && !location)) {
+        message.textContent = eventType === 'rest' ? 'Data non disponibile.' : 'Inserisci data, ora e campo.'
         return
       }
 
@@ -2286,6 +2657,7 @@ export async function attachAppEvents(user) {
           present_count: presentCount,
           squad_total: squadTotal,
           training_sheet_path: filePath,
+          notes: eventType === 'rest' ? JSON.stringify({ type: 'rest_event', rest_note: restNote }) : null,
         })
 
       if (insertError) {
@@ -2389,7 +2761,7 @@ export async function attachAppEvents(user) {
       const time = formData.get('time')
       const locationChoice = String(formData.get('location') ?? '').trim()
       const customLocation = String(formData.get('customLocation') ?? '').trim()
-      const location = locationChoice === '__custom__' ? customLocation : locationChoice
+      const location = eventType === 'rest' ? '' : (locationChoice === '__custom__' ? customLocation : locationChoice)
       const file = formData.get('trainingSheet')
       const matchType = eventType === 'match' ? String(formData.get('matchType') || 'friendly') : null
       const opponent = eventType === 'match' ? String(formData.get('opponent') || '').trim() : ''
@@ -2398,14 +2770,15 @@ export async function attachAppEvents(user) {
         : null
       const presentCount = null
       const squadTotal = null
+      const restNote = eventType === 'rest' ? String(formData.get('restNote') || '').trim() : ''
 
       if (eventType === 'match' && !opponent) {
         message.textContent = 'Inserisci il nome della squadra avversaria.'
         return
       }
 
-      if (!date || !time || !location) {
-        message.textContent = 'Inserisci data, ora e campo.'
+      if (!date || !time || (eventType !== 'rest' && !location)) {
+        message.textContent = eventType === 'rest' ? 'Data non disponibile.' : 'Inserisci data, ora e campo.'
         return
       }
 
@@ -2455,9 +2828,9 @@ export async function attachAppEvents(user) {
           present_count: presentCount,
           squad_total: squadTotal,
           training_sheet_path: nextFilePath,
-          ...(isTrainingEventType(eventType) && currentEvent.rawNotes !== null
-            ? { notes: currentEvent.rawNotes }
-            : {}),
+          notes: eventType === 'rest'
+            ? JSON.stringify({ type: 'rest_event', rest_note: restNote })
+            : (isTrainingEventType(eventType) ? currentEvent.rawNotes : null),
         })
         .eq('id', currentEvent.id)
 
@@ -2573,6 +2946,7 @@ export async function attachAppEvents(user) {
       ?.addEventListener('click', async () => {
         if (!event.editorData) return
         localStorage.setItem('nz-training-sheet-editor-v6-2', JSON.stringify(event.editorData))
+        localStorage.setItem('nz-training-sheet-open-event-id', event.id)
         localStorage.setItem('nz-active-section', 'training-sheet')
         closeDrawer()
         setActiveNavigation('training-sheet')
@@ -2636,6 +3010,712 @@ export async function attachAppEvents(user) {
   }
 
   async function bindDynamic() {
+    root.querySelector('[data-open-team-settings]')?.addEventListener('click', () => setView('team-settings', 'Identità squadra'))
+
+    const teamSettingsForm = root.querySelector('[data-team-settings-form]')
+    if (teamSettingsForm) {
+      const logoInput = teamSettingsForm.elements.logoFile
+      const hiddenLogo = teamSettingsForm.elements.logo
+      const message = teamSettingsForm.querySelector('[data-team-settings-message]')
+      const preview = teamSettingsForm.querySelector('[data-team-brand-preview]')
+      const refreshPreview = () => {
+        const data = Object.fromEntries(new FormData(teamSettingsForm).entries())
+        preview.style.setProperty('--team-primary', data.primaryColor || '#07194f')
+        preview.style.setProperty('--team-secondary', data.secondaryColor || '#1f93e5')
+        preview.querySelector('strong').textContent = data.name || 'Squadra'
+        preview.querySelector('span').textContent = [data.category, data.season].filter(Boolean).join(' · ')
+      }
+      teamSettingsForm.addEventListener('input', refreshPreview)
+      logoInput?.addEventListener('change', async () => {
+        const file = logoInput.files?.[0]
+        if (!file) return
+        if (!['image/png','image/jpeg','image/webp'].includes(file.type) || file.size > 2 * 1024 * 1024) {
+          message.textContent = 'Usa un’immagine PNG, JPG o WebP inferiore a 2 MB.'
+          logoInput.value = ''
+          return
+        }
+        const reader = new FileReader()
+        reader.onload = () => {
+          hiddenLogo.value = String(reader.result || '')
+          const old = preview.querySelector('.team-brand-preview-logo')
+          old?.replaceWith(Object.assign(document.createElement('img'), {
+            className: 'team-brand-preview-logo',
+            src: hiddenLogo.value,
+            alt: 'Logo squadra',
+          }))
+        }
+        reader.readAsDataURL(file)
+      })
+      teamSettingsForm.querySelector('[data-team-logo-remove]')?.addEventListener('click', () => {
+        hiddenLogo.value = ''
+        logoInput.value = ''
+        const old = preview.querySelector('.team-brand-preview-logo')
+        if (old) {
+          const fallback = document.createElement('span')
+          fallback.className = 'team-brand-preview-logo team-brand-preview-logo--fallback'
+          fallback.textContent = (teamSettingsForm.elements.shortName.value || 'T').slice(0,2).toUpperCase()
+          old.replaceWith(fallback)
+        }
+      })
+      teamSettingsForm.querySelectorAll('[data-team-color-field]').forEach((field) => {
+        const input = field.querySelector('input[type="color"]')
+        field.querySelectorAll('[data-team-color-value]').forEach((button) => {
+          button.addEventListener('click', () => {
+            input.value = button.dataset.teamColorValue
+            input.dispatchEvent(new Event('input', { bubbles: true }))
+          })
+        })
+      })
+      const tokenPreview = teamSettingsForm.querySelector('[data-team-token-preview] .team-token-preview')
+      const refreshTeamPreview = () => {
+        const primary = teamSettingsForm.elements.primaryColor.value
+        const secondary = teamSettingsForm.elements.secondaryColor.value
+        const pattern = teamSettingsForm.elements.kitPattern.value
+        preview.style.setProperty('--team-primary', primary)
+        preview.style.setProperty('--team-secondary', secondary)
+        if (tokenPreview) {
+          tokenPreview.style.setProperty('--token-primary', primary)
+          tokenPreview.style.setProperty('--token-secondary', secondary)
+          tokenPreview.className = `team-token-preview team-token-preview--${pattern}`
+          const label = tokenPreview.querySelector('small')
+          if (label) label.textContent = teamSettingsForm.elements.shortName.value || 'TEAM'
+        }
+      }
+      teamSettingsForm.addEventListener('input', refreshTeamPreview)
+      teamSettingsForm.addEventListener('change', refreshTeamPreview)
+      teamSettingsForm.addEventListener('submit', async (event) => {
+        event.preventDefault()
+        const submitButton = teamSettingsForm.querySelector('button[type="submit"]')
+        const formData = new FormData(teamSettingsForm)
+        const data = Object.fromEntries(formData.entries())
+        const logoFile = formData.get('logoFile')
+        delete data.logoFile
+        submitButton.disabled = true
+        submitButton.textContent = 'Salvataggio...'
+        message.textContent = ''
+        try {
+          await saveTeamProfile(data, { user: currentUser, logoFile, removeLogo: !data.logo && !(logoFile instanceof File && logoFile.size) })
+          message.textContent = 'Identità squadra salvata e sincronizzata.'
+          message.classList.remove('is-error')
+          document.querySelectorAll('.team-brand-logo').forEach((node) => {
+            const wrapper = document.createElement('div')
+            wrapper.innerHTML = teamLogoHtml(node.className)
+            node.replaceWith(wrapper.firstElementChild)
+          })
+        } catch (error) {
+          console.error('Errore salvataggio identità squadra:', error)
+          message.textContent = error?.message || 'Impossibile salvare la configurazione squadra.'
+          message.classList.add('is-error')
+        } finally {
+          submitButton.disabled = false
+          submitButton.textContent = 'Salva identità squadra'
+        }
+      })
+    }
+
+    const callupsPanel = root.querySelector('[data-callups-panel]')
+    root.querySelector('[data-open-callups]')?.addEventListener('click', () => {
+      callupsPanel.hidden = !callupsPanel.hidden
+      if (!callupsPanel.hidden) callupsPanel.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+    if (callupsPanel) {
+      const checks = [...callupsPanel.querySelectorAll('[data-callup-player]')]
+      const countEl = callupsPanel.querySelector('[data-callups-count]')
+      const alertEl = callupsPanel.querySelector('[data-callups-alert]')
+      const pdfButton = callupsPanel.querySelector('[data-callups-pdf]')
+      let limit = 20
+      const updateCallups = () => {
+        const selected = checks.filter((check) => check.checked)
+        selected.forEach((check,index) => {
+          check.closest('.callup-player').querySelector('[data-callup-order]').textContent = String(index + 1).padStart(2,'0')
+        })
+        checks.filter((check) => !check.checked).forEach((check) => {
+          check.closest('.callup-player').querySelector('[data-callup-order]').textContent = '—'
+        })
+        countEl.textContent = String(selected.length)
+        alertEl.hidden = selected.length < 20
+        alertEl.textContent = selected.length >= 20 ? `${selected.length} giocatori selezionati${limit > 20 ? ' · valutazione extra attiva' : ' · limite ordinario raggiunto'}` : ''
+        pdfButton.disabled = selected.length === 0
+        checks.filter((check) => !check.checked).forEach((check) => { check.disabled = selected.length >= limit })
+      }
+      checks.forEach((check) => check.addEventListener('change', updateCallups))
+      callupsPanel.querySelector('[data-callups-extra]')?.addEventListener('click', () => {
+        limit += 1
+        updateCallups()
+      })
+      pdfButton?.addEventListener('click', async () => {
+        const team = getTeamProfile()
+        const selected = checks.filter((check) => check.checked).map((check,index)=>({ order:index+1, name:check.value }))
+        const match = callupsPanel.querySelector('[data-callups-match]').value || 'Partita da definire'
+        const date = callupsPanel.querySelector('[data-callups-date]').value || ''
+        const logo = team.logo ? `<img src="${escapeHtml(team.logo)}" alt="Logo ${escapeHtml(team.shortName)}">` : `<span>${escapeHtml((team.shortName||'T').slice(0,2).toUpperCase())}</span>`
+        const html = `<main class="callups-print"><header>${logo}<div><h1>${escapeHtml(team.name)}</h1><p>Convocazioni · ${escapeHtml(match)}</p></div></header><div class="meta"><b>${date ? new Date(date+'T12:00:00').toLocaleDateString('it-IT') : 'Data da definire'}</b><span>${selected.length} convocati</span></div><div class="list">${selected.map(item=>`<div class="player"><b>${String(item.order).padStart(2,'0')}</b><span>${escapeHtml(item.name)}</span></div>`).join('')}</div></main>`
+        const styles = `<style>@page{size:A4;margin:12mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;margin:0;color:#07194f}.callups-print header{display:flex;align-items:center;gap:18px;border-bottom:5px solid ${escapeHtml(team.primaryColor)};padding-bottom:18px}.callups-print header img,.callups-print header>span{width:72px;height:72px;object-fit:contain;border-radius:14px;display:grid;place-items:center;background:${escapeHtml(team.primaryColor)};color:#fff;font-weight:800}.callups-print h1{margin:0;font-size:32px}.callups-print p{margin:6px 0 0}.meta{display:flex;justify-content:space-between;gap:24px;margin:24px 0;padding:16px;background:#f1f5f9;border-left:5px solid ${escapeHtml(team.secondaryColor)}}.list{display:grid;grid-template-columns:1fr 1fr;gap:10px 24px}.player{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid #cbd5e1;border-radius:10px;break-inside:avoid}.player b{font-size:20px;color:${escapeHtml(team.secondaryColor)}}@media(max-width:700px){.list{grid-template-columns:1fr}}</style>`
+        pdfButton.disabled = true
+        try { await printHtmlDocument({ title: `Convocazioni - ${team.shortName}`, html, styles }) }
+        catch (error) { alert(error?.message || 'Impossibile aprire la stampa.') }
+        finally { pdfButton.disabled = false }
+      })
+      updateCallups()
+    }
+
+    const board = root.querySelector('[data-board-view]')
+    if (board) {
+      const pitch = board.querySelector('[data-board-pitch]')
+      const saved = readLocalJson('nz-board-v1', {})
+      const formationLayoutsLocal = {
+        '4-4-2': [[50,90],[18,72],[38,76],[62,76],[82,72],[18,48],[38,52],[62,52],[82,48],[38,24],[62,24]],
+        '4-3-3': [[50,90],[18,72],[38,76],[62,76],[82,72],[28,50],[50,56],[72,50],[18,24],[50,18],[82,24]],
+        '3-5-2': [[50,90],[25,74],[50,78],[75,74],[12,48],[32,52],[50,58],[68,52],[88,48],[38,22],[62,22]],
+      }
+      const defaultLayout = formationLayoutsLocal['4-4-2']
+      const setBoardToken = (side,index,x,y) => {
+        const token = board.querySelector(`[data-board-token="${side}-${index}"]`)
+        if (!token) return
+        const nx = Math.max(4,Math.min(96,Number(x)))
+        const ny = Math.max(4,Math.min(96,Number(y)))
+        token.style.setProperty('--x',nx)
+        token.style.setProperty('--y',ny)
+        board.querySelector(`[name="${side}_x_${index}"]`).value = nx
+        board.querySelector(`[name="${side}_y_${index}"]`).value = ny
+      }
+      const applyBoardFormation = (side,formation) => {
+        const layout = formationLayoutsLocal[formation] || defaultLayout
+        layout.forEach((point,index) => {
+          const y = side === 'away' ? 100 - point[1] : point[1]
+          setBoardToken(side,index,point[0],y)
+        })
+      }
+      const saveBoard = () => {
+        const data = {}
+        board.querySelectorAll('input[name], select[name]').forEach((field) => { data[field.name] = field.value })
+        localStorage.setItem('nz-board-v1',JSON.stringify(data))
+      }
+      board.querySelectorAll('select').forEach((select) => select.addEventListener('change', () => {
+        const side = select.name.includes('home') ? 'home' : 'away'
+        applyBoardFormation(side,select.value); saveBoard()
+      }))
+      board.querySelectorAll('input[type="color"]').forEach((input) => input.addEventListener('input', () => {
+        const side=input.name.includes('home')?'home':'away'
+        board.style.setProperty(`--board-${side}`,input.value); saveBoard()
+      }))
+      board.querySelectorAll('[data-board-token]').forEach((token) => {
+        let dragging=false
+        const [side,indexText]=token.dataset.boardToken.split('-')
+        const index=Number(indexText)
+        const move=(event)=>{
+          if(!dragging)return
+          const rect=pitch.getBoundingClientRect()
+          setBoardToken(side,index,((event.clientX-rect.left)/rect.width)*100,((event.clientY-rect.top)/rect.height)*100)
+        }
+        token.addEventListener('pointerdown',(event)=>{dragging=true;token.setPointerCapture?.(event.pointerId);event.preventDefault()})
+        token.addEventListener('pointermove',move)
+        token.addEventListener('pointerup',(event)=>{move(event);dragging=false;token.releasePointerCapture?.(event.pointerId);saveBoard()})
+        token.addEventListener('pointercancel',()=>{dragging=false})
+      })
+      board.querySelector('[data-board-reset]')?.addEventListener('click',()=>{applyBoardFormation('home',board.querySelector('[name="board_home_formation"]').value);applyBoardFormation('away',board.querySelector('[name="board_away_formation"]').value);saveBoard()})
+      if (Object.keys(saved).length) {
+        Object.entries(saved).forEach(([key,value])=>{const field=board.querySelector(`[name="${CSS.escape(key)}"]`);if(field)field.value=value})
+        board.style.setProperty('--board-home', saved.board_home_color || getTeamProfile().primaryColor)
+        board.style.setProperty('--board-away', saved.board_away_color || '#9f1239')
+        for (const side of ['home','away']) for(let i=0;i<11;i++) setBoardToken(side,i,saved[`${side}_x_${i}`]??50,saved[`${side}_y_${i}`]??50)
+      } else {
+        board.style.setProperty('--board-home', getTeamProfile().primaryColor)
+        board.style.setProperty('--board-away', '#9f1239')
+        applyBoardFormation('home','4-3-3'); applyBoardFormation('away','4-4-2')
+      }
+    }
+
+    const matchEditor = root.querySelector('[data-match-editor]')
+    if (matchEditor) {
+      const form = matchEditor.querySelector('[data-match-form]')
+      const steps = [...matchEditor.querySelectorAll('[data-match-step]')]
+      const stepButtons = [...matchEditor.querySelectorAll('[data-match-step-button]')]
+      const prev = matchEditor.querySelector('[data-match-prev]')
+      const next = matchEditor.querySelector('[data-match-next]')
+      const pdf = matchEditor.querySelector('[data-match-pdf]')
+      const progress = matchEditor.querySelector('[data-match-progress]')
+      const state = matchEditor.querySelector('[data-match-save-state]')
+      const storageKey = 'nz-match-sheet-editor-v1'
+      const matchRosterOptions = getTrainingSheetRosterPlayers()
+        .map((player) => `<option value="${escapeHtml(player.canonicalName)}">${escapeHtml(player.surname)} ${escapeHtml(player.firstName)}</option>`)
+        .join('')
+      let activeStep = 1
+      let saveTimer
+      let hasSavedTokenPositions = false
+      const escape = (value='') => String(value).replace(/[&<>\"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#039;'}[char]))
+      const showStep = (value) => {
+        activeStep = Math.min(5, Math.max(1, Number(value)))
+        steps.forEach((step) => step.classList.toggle('is-active', Number(step.dataset.matchStep) === activeStep))
+        stepButtons.forEach((button) => button.classList.toggle('is-active', Number(button.dataset.matchStepButton) === activeStep))
+        prev.disabled = activeStep === 1
+        next.hidden = activeStep === 5
+        pdf.hidden = activeStep !== 5
+        progress.textContent = `Passaggio ${activeStep} di 5`
+        renderReport()
+        window.scrollTo({top:0, behavior:'smooth'})
+      }
+      const collect = () => {
+        if (form.elements.result) form.elements.result.value = normalizeScore(form.elements.result_home?.value, form.elements.result_away?.value)
+        if (form.elements.half_result) form.elements.half_result.value = normalizeScore(form.elements.half_result_home?.value, form.elements.half_result_away?.value)
+        const data = Object.fromEntries(new FormData(form).entries())
+        form.querySelectorAll('input[type="checkbox"]').forEach((input) => { data[input.name] = input.checked })
+        return data
+      }
+      const save = () => { localStorage.setItem(storageKey, JSON.stringify(collect())); if(state) state.textContent='Bozza salvata' }
+      const scheduleSave = () => { if(state) state.textContent='Salvataggio…'; clearTimeout(saveTimer); saveTimer=setTimeout(save,350) }
+      const renderNotes = () => {
+        const rootNotes = matchEditor.querySelector('[data-note-fields]')
+        const mode = form.elements.notes_mode.value
+        const labels = mode==='halves' ? ['Primo tempo','Intervallo','Secondo tempo','Considerazioni finali'] : mode==='quarters' ? ['0’–15’','16’–30’','31’–45’','46’–60’','61’–75’','76’–90’','Recupero'] : ['Note partita']
+        rootNotes.innerHTML = `<div class="dynamic-notes-grid ${mode==='free'?'single':''}">${labels.map((label,i)=>`<label><span>${label}</span><textarea name="own_note_${i}" rows="${mode==='free'?12:5}"></textarea></label>`).join('')}</div>`
+      }
+      const eventContainers = {
+        substitution: matchEditor.querySelector('[data-substitutions]'),
+        goal: matchEditor.querySelector('[data-goals]'),
+        card: matchEditor.querySelector('[data-cards]'),
+      }
+      const eventRowCounts = { substitution: 0, goal: 0, card: 0 }
+      const eventRowMarkup = (type, index, values = {}) => {
+        const remove = '<button type="button" class="event-remove-button" data-remove-match-row aria-label="Rimuovi riga">×</button>'
+        if (type === 'substitution') return `<div class="event-row event-row--sub" data-match-row="substitution"><input type="number" name="sub_minute_${index}" min="1" max="130" placeholder="Min." value="${escape(values.minute || '')}"><select name="sub_out_${index}"><option value="">Esce</option>${matchRosterOptions}</select><select name="sub_in_${index}"><option value="">Entra</option>${matchRosterOptions}</select><select name="sub_reason_${index}"><option>Tattico</option><option>Tecnico</option><option>Fisico</option><option>Infortunio</option><option>Gestione</option></select>${remove}</div>`
+        if (type === 'goal') return `<div class="event-row event-row--goal" data-match-row="goal"><input type="number" name="goal_minute_${index}" min="1" max="130" placeholder="Min." value="${escape(values.minute || '')}"><select name="scorer_${index}"><option value="">Marcatore</option>${matchRosterOptions}</select><select name="assist_${index}"><option value="">Assist</option>${matchRosterOptions}</select>${remove}</div>`
+        return `<div class="event-row event-row--card" data-match-row="card"><input type="number" name="card_minute_${index}" min="1" max="130" placeholder="Min." value="${escape(values.minute || '')}"><select name="card_player_${index}"><option value="">Giocatore</option>${matchRosterOptions}</select><select name="card_type_${index}"><option>Ammonizione</option><option>Doppia ammonizione</option><option>Espulsione</option></select>${remove}</div>`
+      }
+      const addEventRow = (type, values = {}) => {
+        const container = eventContainers[type]
+        if (!container) return
+        const limit = type === 'substitution' ? 5 : 12
+        if (container.children.length >= limit) return
+        const index = eventRowCounts[type]++
+        container.insertAdjacentHTML('beforeend', eventRowMarkup(type, index, values))
+        const row = container.lastElementChild
+        Object.entries(values).forEach(([key, value]) => {
+          const fieldMap = type === 'substitution' ? {out:`sub_out_${index}`,in:`sub_in_${index}`,reason:`sub_reason_${index}`} : type === 'goal' ? {scorer:`scorer_${index}`,assist:`assist_${index}`} : {player:`card_player_${index}`,cardType:`card_type_${index}`}
+          const field = form.elements[fieldMap[key]]
+          if (field) field.value = value
+        })
+        row.querySelector('[data-remove-match-row]')?.addEventListener('click', () => { row.remove(); scheduleSave(); renderReport() })
+      }
+      matchEditor.addEventListener('click', (event) => {
+        const addButton = event.target.closest('[data-add-match-row]')
+        if (!addButton || !matchEditor.contains(addButton)) return
+        event.preventDefault()
+        try {
+          addEventRow(addButton.dataset.addMatchRow)
+          scheduleSave()
+          renderReport()
+        } catch (error) {
+          console.error('Errore aggiunta evento Match Sheet:', error)
+          if (state) state.textContent = 'Errore: impossibile aggiungere la riga'
+        }
+      })
+      const autoAssignCoreRoles = () => {
+        const roster = getTrainingSheetRosterPlayers()
+        const currentSelections = Array.from({ length: 11 }, (_, i) => form.elements[`starter_${i}`]?.value).filter(Boolean)
+        if (currentSelections.length) return
+        const byRole = (pattern) => roster.filter((player) => pattern.test(player.role || ''))
+        const pools = {
+          goalkeeper: byRole(/portier/i),
+          defenders: byRole(/difensor/i),
+          midfielders: byRole(/centrocamp/i),
+          attackers: byRole(/attacc/i),
+        }
+        const assignment = [
+          pools.goalkeeper[0],
+          pools.defenders[0], pools.defenders[1], pools.defenders[2], pools.defenders[3],
+          pools.midfielders[0], pools.midfielders[1], pools.midfielders[2], pools.midfielders[3], pools.attackers[1] || pools.midfielders[4],
+          pools.attackers[0],
+        ]
+        assignment.forEach((player, index) => {
+          if (player && form.elements[`starter_${index}`]) form.elements[`starter_${index}`].value = player.canonicalName
+        })
+      }
+      const updateTokens = () => {
+        const showNumber = Boolean(form.elements.token_number?.checked)
+        const showSurname = Boolean(form.elements.token_surname?.checked)
+        const showPhoto = Boolean(form.elements.token_photo?.checked)
+        const captainIndex = String(form.elements.captain?.value ?? '')
+        matchEditor.querySelectorAll('[data-player-token]').forEach((token) => {
+          const i = Number(token.dataset.playerToken)
+          const name = form.elements[`starter_${i}`]?.value || `Giocatore ${i + 1}`
+          const number = form.elements[`starter_number_${i}`]?.value || i + 1
+          const surname = name.trim().split(/\s+/).at(-1) || name
+          const badge = token.querySelector('.token-photo')
+          const label = token.querySelector('small')
+          token.classList.toggle('show-photo', showPhoto)
+          token.classList.toggle('is-captain', captainIndex === String(i))
+          badge.textContent = showPhoto ? surname.slice(0, 2).toUpperCase() : (showNumber ? number : '')
+          badge.hidden = !showPhoto && !showNumber
+          label.textContent = showSurname ? surname : ''
+          label.hidden = !showSurname
+        })
+        const captainSelect = form.elements.captain
+        if (captainSelect) {
+          Array.from(captainSelect.options).forEach((option, index) => {
+            if (index === 0) return
+            const playerIndex = Number(option.value)
+            const playerName = form.elements[`starter_${playerIndex}`]?.value
+            option.textContent = playerName ? (playerName.trim().split(/\s+/).at(-1) || playerName) : `Pedina ${playerIndex + 1}`
+          })
+        }
+      }
+      const formationLayouts = {
+        '4-4-2': [[50,90],[15,72],[38,72],[62,72],[85,72],[15,48],[38,48],[62,48],[85,48],[38,22],[62,22]],
+        '4-3-3': [[50,90],[15,72],[38,72],[62,72],[85,72],[25,50],[50,50],[75,50],[15,22],[50,18],[85,22]],
+        '4-2-3-1': [[50,90],[15,72],[38,72],[62,72],[85,72],[35,56],[65,56],[18,36],[50,34],[82,36],[50,16]],
+        '4-3-1-2': [[50,90],[15,72],[38,72],[62,72],[85,72],[24,52],[50,55],[76,52],[50,34],[36,17],[64,17]],
+        '4-1-4-1': [[50,90],[15,72],[38,72],[62,72],[85,72],[50,58],[15,40],[38,40],[62,40],[85,40],[50,17]],
+        '3-5-2': [[50,90],[24,70],[50,73],[76,70],[12,48],[32,50],[50,56],[68,50],[88,48],[36,18],[64,18]],
+        '3-4-1-2': [[50,90],[24,70],[50,73],[76,70],[15,48],[38,51],[62,51],[85,48],[50,33],[36,16],[64,16]],
+        '3-4-2-1': [[50,90],[24,70],[50,73],[76,70],[15,49],[38,52],[62,52],[85,49],[32,31],[68,31],[50,14]],
+        '3-4-3': [[50,90],[24,70],[50,73],[76,70],[15,48],[38,52],[62,52],[85,48],[16,20],[50,15],[84,20]],
+        '5-3-2': [[50,90],[10,68],[30,72],[50,74],[70,72],[90,68],[25,49],[50,53],[75,49],[36,18],[64,18]],
+        '5-4-1': [[50,90],[10,68],[30,72],[50,74],[70,72],[90,68],[15,44],[38,48],[62,48],[85,44],[50,16]]
+      }
+      const setOpponentTokenPosition = (index, x, y, persist = true) => {
+        const token = matchEditor.querySelector(`[data-opponent-token="${index}"]`)
+        if (!token) return
+        const safeX = Math.min(93, Math.max(7, Number(x) || 50))
+        const safeY = Math.min(93, Math.max(7, Number(y) || 50))
+        token.style.setProperty('--x', safeX.toFixed(2))
+        token.style.setProperty('--y', safeY.toFixed(2))
+        const xInput = form.elements[`opponent_position_x_${index}`]
+        const yInput = form.elements[`opponent_position_y_${index}`]
+        if (xInput) xInput.value = safeX.toFixed(2)
+        if (yInput) yInput.value = safeY.toFixed(2)
+        if (persist) scheduleSave()
+      }
+      const updateOpponentPitch = (formation = '4-4-2', persist = true) => {
+        const layout = formationLayouts[formation] || formationLayouts['4-4-2']
+        layout.forEach(([x,y], index) => setOpponentTokenPosition(index, x, y, false))
+        if (persist) scheduleSave()
+      }
+      const bindOpponentTokenDragging = () => {
+        const pitch = matchEditor.querySelector('[data-opponent-pitch]')
+        if (!pitch) return
+        matchEditor.querySelectorAll('[data-opponent-token]').forEach((token) => {
+          let dragging = false
+          const move = (event) => {
+            if (!dragging) return
+            const rect = pitch.getBoundingClientRect()
+            setOpponentTokenPosition(Number(token.dataset.opponentToken), ((event.clientX-rect.left)/rect.width)*100, ((event.clientY-rect.top)/rect.height)*100, false)
+          }
+          token.addEventListener('pointerdown', (event) => {
+            if (event.button !== undefined && event.button !== 0) return
+            dragging = true
+            token.classList.add('is-dragging')
+            token.setPointerCapture?.(event.pointerId)
+            event.preventDefault()
+          })
+          token.addEventListener('pointermove', move)
+          token.addEventListener('pointerup', (event) => {
+            if (!dragging) return
+            move(event); dragging = false; token.classList.remove('is-dragging'); token.releasePointerCapture?.(event.pointerId); scheduleSave(); renderReport()
+          })
+          token.addEventListener('pointercancel', () => { dragging = false; token.classList.remove('is-dragging') })
+        })
+      }
+      const clampPosition = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0))
+      const setTokenPosition = (index, x, y, persist = true) => {
+        const token = matchEditor.querySelector(`[data-player-token="${index}"]`)
+        if (!token) return
+        const safeX = clampPosition(x, 7, 93)
+        const safeY = clampPosition(y, 7, 93)
+        token.style.setProperty('--x', safeX.toFixed(2))
+        token.style.setProperty('--y', safeY.toFixed(2))
+        const xInput = form.elements[`position_x_${index}`]
+        const yInput = form.elements[`position_y_${index}`]
+        if (xInput) xInput.value = safeX.toFixed(2)
+        if (yInput) yInput.value = safeY.toFixed(2)
+        if (persist) scheduleSave()
+      }
+      const positionsFromCustomFormation = (value) => {
+        const lines = String(value || '').trim().split('-').map(Number)
+        if (!lines.length || lines.some((n) => !Number.isInteger(n) || n < 1 || n > 5) || lines.reduce((a,b)=>a+b,0) !== 10) return null
+        const result = [[50,90]]
+        const yTop = 18
+        const yBottom = 70
+        lines.forEach((count, layerIndex) => {
+          const y = lines.length === 1 ? 45 : yBottom - ((yBottom-yTop) * layerIndex / (lines.length-1))
+          for (let i=0;i<count;i++) result.push([100*(i+1)/(count+1), y])
+        })
+        return result
+      }
+      const applyFormation = (formation, persist = true) => {
+        const layout = formation === 'Personalizzato'
+          ? positionsFromCustomFormation(form.elements.custom_formation?.value)
+          : formationLayouts[formation]
+        if (!layout || layout.length !== 11) return false
+        layout.forEach(([x,y], index) => setTokenPosition(index, x, y, false))
+        if (persist) scheduleSave()
+        return true
+      }
+      const restoreTokenPositions = () => {
+        if (!hasSavedTokenPositions) {
+          applyFormation(form.elements.formation.value, false)
+          return
+        }
+        let restored = true
+        for (let i=0;i<11;i++) {
+          const x = Number(form.elements[`position_x_${i}`]?.value)
+          const y = Number(form.elements[`position_y_${i}`]?.value)
+          if (!Number.isFinite(x) || !Number.isFinite(y)) { restored = false; break }
+        }
+        if (restored) {
+          for (let i=0;i<11;i++) setTokenPosition(i, form.elements[`position_x_${i}`].value, form.elements[`position_y_${i}`].value, false)
+        } else {
+          applyFormation(form.elements.formation.value, false)
+        }
+      }
+      const bindTokenDragging = () => {
+        const pitch = matchEditor.querySelector('[data-football-pitch]')
+        if (!pitch) return
+        matchEditor.querySelectorAll('[data-player-token]').forEach((token) => {
+          let dragging = false
+          const move = (event) => {
+            if (!dragging) return
+            const rect = pitch.getBoundingClientRect()
+            const x = ((event.clientX - rect.left) / rect.width) * 100
+            const y = ((event.clientY - rect.top) / rect.height) * 100
+            setTokenPosition(Number(token.dataset.playerToken), x, y, false)
+          }
+          token.addEventListener('pointerdown', (event) => {
+            if (event.button !== undefined && event.button !== 0) return
+            dragging = true
+            token.classList.add('is-dragging')
+            token.setPointerCapture?.(event.pointerId)
+            event.preventDefault()
+          })
+          token.addEventListener('pointermove', move)
+          token.addEventListener('pointerup', (event) => {
+            if (!dragging) return
+            move(event)
+            dragging = false
+            token.classList.remove('is-dragging')
+            token.releasePointerCapture?.(event.pointerId)
+            scheduleSave()
+          })
+          token.addEventListener('pointercancel', () => {
+            dragging = false
+            token.classList.remove('is-dragging')
+          })
+          token.addEventListener('keydown', (event) => {
+            const delta = event.shiftKey ? 5 : 1
+            const currentX = Number(form.elements[`position_x_${token.dataset.playerToken}`]?.value || 50)
+            const currentY = Number(form.elements[`position_y_${token.dataset.playerToken}`]?.value || 50)
+            const directions = {ArrowLeft:[-delta,0],ArrowRight:[delta,0],ArrowUp:[0,-delta],ArrowDown:[0,delta]}
+            if (!directions[event.key]) return
+            event.preventDefault()
+            const [dx,dy] = directions[event.key]
+            setTokenPosition(Number(token.dataset.playerToken), currentX+dx, currentY+dy)
+          })
+        })
+      }
+      const renderReport = () => {
+        const d = collect()
+        const preview = matchEditor.querySelector('[data-match-report-preview]')
+        const formationName = d.custom_formation || d.formation || '—'
+        const starters = Array.from({ length: 11 }, (_, i) => ({
+          number: d[`starter_number_${i}`] || '',
+          name: d[`starter_${i}`] || 'Da definire',
+          x: Number(d[`position_x_${i}`] || 50),
+          y: Number(d[`position_y_${i}`] || 50),
+        }))
+        const bench = Array.from({ length: 9 }, (_, i) => ({ number: d[`bench_number_${i}`] || '', name: d[`bench_${i}`] || '' })).filter((item) => item.name)
+        const rowIndex = (row, prefix) => Number(row.querySelector(`[name^="${prefix}"]`)?.name.match(/\d+/)?.[0])
+        const substitutions = [...matchEditor.querySelectorAll('[data-match-row="substitution"]')].map((row) => {
+          const i = rowIndex(row, 'sub_minute_')
+          return { minute: d[`sub_minute_${i}`], out: d[`sub_out_${i}`], in: d[`sub_in_${i}`], reason: d[`sub_reason_${i}`] }
+        }).filter((item) => item.minute || item.out || item.in)
+        const goals = [...matchEditor.querySelectorAll('[data-match-row="goal"]')].map((row) => {
+          const i = rowIndex(row, 'goal_minute_')
+          return { minute: d[`goal_minute_${i}`], scorer: d[`scorer_${i}`], assist: d[`assist_${i}`] }
+        }).filter((item) => item.minute || item.scorer)
+        const cards = [...matchEditor.querySelectorAll('[data-match-row="card"]')].map((row) => {
+          const i = rowIndex(row, 'card_minute_')
+          return { minute: d[`card_minute_${i}`], player: d[`card_player_${i}`], type: d[`card_type_${i}`] }
+        }).filter((item) => item.minute || item.player)
+        const opponentSystems = Object.keys(d)
+          .filter((key) => /^opponent_system_\d+$/.test(key))
+          .sort((a, b) => Number(a.match(/\d+/)[0]) - Number(b.match(/\d+/)[0]))
+          .map((key) => {
+            const index = key.match(/\d+/)[0]
+            return { system: d[key], minute: d[`opponent_system_minute_${index}`], note: d[`opponent_system_note_${index}`] }
+          })
+          .filter((item) => item.system)
+        const ownNotes = Object.keys(d).filter((key) => /^own_note_\d+$/.test(key) && d[key]).sort().map((key) => d[key])
+        const possessionLabels = ['Costruzione da rimessa','Costruzione media','Sviluppo e rifinitura','Finalizzazione','Transizione positiva']
+        const nonPossessionLabels = ['Prima pressione','Blocco medio','Blocco basso','Transizione negativa']
+        const possessionNotes = possessionLabels.map((label,i)=>({label,note:d[`opponent_possession_note_${i}`]})).filter((item)=>item.note)
+        const nonPossessionNotes = nonPossessionLabels.map((label,i)=>({label,note:d[`opponent_nonpossession_note_${i}`]})).filter((item)=>item.note)
+        const setPieces = [
+          d.opponent_corners ? {label:'Calci d’angolo',note:d.opponent_corners} : null,
+          d.opponent_wide_free_kicks ? {label:'Punizioni laterali',note:d.opponent_wide_free_kicks} : null,
+        ].filter(Boolean)
+        const penaltySummary = d.opponent_penalty_taken ? [d.opponent_penalty_result,d.opponent_penalty_direction,d.opponent_penalty_note].filter(Boolean).join(' · ') : ''
+        const pitchTokens = starters.map((player) => `<span class="report-token" style="left:${player.x}%;top:${player.y}%"><b>${escape(player.number)}</b><small>${escape(player.name.split(/\s+/).at(-1) || player.name)}</small></span>`).join('')
+        preview.innerHTML = `<article class="match-report-paper">
+          <div class="match-report-watermark"><b>NZ</b><span>NICOLA ZECCHI · MATCH REPORT</span></div>
+          <header class="match-report-hero"><div><span class="match-report-kicker">MATCH SHEET · ${escape(team.shortName || team.name)}</span><h2>${escape(d.opponent || 'Avversario da definire')}</h2><p>${escape(d.competition || '')} · ${escape(d.date || '')} · ${escape(d.location || '')}</p></div><div class="match-report-result"><small>RISULTATO</small><strong>${escape(d.result || '—')}</strong></div></header>
+          <div class="report-summary"><span><small>Sistema</small><b>${escape(formationName)}</b></span><span><small>1° tempo</small><b>${escape(d.half_result || '—')}</b></span><span><small>Casa/Trasferta</small><b>${escape(d.venue || '—')}</b></span></div>
+          <section class="report-lineup-section"><h3>Confronto sistemi di gioco</h3><div class="report-dual-pitches"><article><h4>${escape(team.shortName || team.name)} · ${escape(formationName)}</h4><div class="report-pitch"><span class="pitch-goal pitch-goal-top"></span><span class="pitch-goal pitch-goal-bottom"></span>${pitchTokens}</div></article><article><h4>${escape(d.opponent || 'Avversario')} · ${escape(opponentSystems[0]?.system || 'Da definire')}</h4><div class="report-pitch report-pitch--opponent"><span class="pitch-goal pitch-goal-top"></span><span class="pitch-goal pitch-goal-bottom"></span>${Array.from({length:11},(_,i)=>{const fallback=(formationLayouts[opponentSystems[0]?.system]||formationLayouts['4-4-2'])[i]||[50,50];const x=Number(d[`opponent_position_x_${i}`]||fallback[0]);const y=Number(d[`opponent_position_y_${i}`]||fallback[1]);return `<span class="report-token report-token--opponent" style="left:${x}%;top:${y}%"><b>${i+1}</b></span>`}).join('')}</div></article></div><div class="report-bench-strip"><h4>A disposizione</h4>${bench.length ? `<ol>${bench.map((item)=>`<li><b>${escape(item.number || '—')}</b> ${escape(item.name)}</li>`).join('')}</ol>` : '<p>Da definire</p>'}</div></section>
+          <section class="report-event-grid report-event-grid--three"><div><h3>Sostituzioni</h3>${substitutions.length ? `<ul>${substitutions.map((item)=>`<li><b>${escape(item.minute || '—')}’</b> ${escape(item.out || '—')} → ${escape(item.in || '—')} <small>${escape(item.reason || '')}</small></li>`).join('')}</ul>` : '<p>Nessuna</p>'}</div><div><h3>Gol e assist</h3>${goals.length ? `<ul>${goals.map((item)=>`<li><b>${escape(item.minute || '—')}’</b> ${escape(item.scorer || '—')}${item.assist ? ` · assist ${escape(item.assist)}` : ''}</li>`).join('')}</ul>` : '<p>Nessun gol registrato</p>'}</div><div><h3>Sanzioni</h3>${cards.length ? `<ul>${cards.map((item)=>`<li><b>${escape(item.minute || '—')}’</b> ${escape(item.player || '—')} · ${escape(item.type || '')}</li>`).join('')}</ul>` : '<p>Nessuna sanzione</p>'}</div></section>
+          <section><h3>Note propria squadra</h3>${ownNotes.length ? ownNotes.map((note)=>`<p>${escape(note)}</p>`).join('') : '<p>Da completare</p>'}</section>
+          <section class="report-two-cols"><div><h3>Sistemi avversari</h3>${opponentSystems.length ? `<ul>${opponentSystems.map((item,index)=>`<li><b>${index===0?'Iniziale':escape(item.minute || 'Cambio')}</b> · ${escape(item.system)}${item.note ? `<br><small>${escape(item.note)}</small>` : ''}</li>`).join('')}</ul>` : '<p>Da definire</p>'}</div><div><h3>Fasi avversarie</h3><h4>Possesso</h4>${possessionNotes.length ? possessionNotes.map(item=>`<p><b>${escape(item.label)}:</b> ${escape(item.note)}</p>`).join('') : '<p>—</p>'}<h4>Non possesso</h4>${nonPossessionNotes.length ? nonPossessionNotes.map(item=>`<p><b>${escape(item.label)}:</b> ${escape(item.note)}</p>`).join('') : '<p>—</p>'}</div></section><section><h3>Palle inattive avversarie</h3>${setPieces.length ? `<div class="report-set-pieces">${setPieces.map(item=>`<article><h4>${escape(item.label)}</h4><p>${escape(item.note)}</p></article>`).join('')}</div>` : '<p>Da completare</p>'}${penaltySummary ? `<p class="report-penalty"><b>Rigore:</b> ${escape(penaltySummary)}</p>` : ''}</section>
+          <section class="report-two-cols"><div><h3>Valutazione propria squadra</h3><p><b>Punti di forza:</b> ${escape(d.own_strengths || 'Da completare')}</p><p><b>Criticità:</b> ${escape(d.own_issues || 'Da completare')}</p></div><div><h3>Valutazione avversario</h3><p><b>Punti di forza:</b> ${escape(d.opp_strengths || 'Da completare')}</p><p><b>Punti deboli:</b> ${escape(d.opp_weaknesses || 'Da completare')}</p><p><b>Per il ritorno:</b> ${escape(d.return_notes || 'Da completare')}</p></div></section>
+        </article>`
+        const inlineData = {
+          1: `<strong>${escape(d.opponent || 'Avversario da definire')}</strong><span>${escape(d.competition || '—')} · ${escape(d.date || '—')} · ${escape(d.result || '—')}</span>`,
+          2: `<strong>${escape(team.shortName || team.name)} · ${escape(formationName)}</strong><span>${starters.filter((item)=>item.name && item.name !== 'Da definire').length}/11 titolari · ${bench.length} a disposizione</span>`,
+          3: `<strong>${escape(d.opponent || 'Avversario')}</strong><span>${escape(opponentSystems[0]?.system || 'Sistema da definire')} · ${possessionNotes.length + nonPossessionNotes.length} osservazioni</span>`,
+          4: `<strong>${substitutions.length} cambi · ${goals.length} gol · ${cards.length} sanzioni</strong><span>${ownNotes.length ? `${ownNotes.length} blocchi note compilati` : 'Note da completare'}</span>`
+        }
+        matchEditor.querySelectorAll('[data-match-inline-preview]').forEach((box) => {
+          box.innerHTML = `<span>ANTEPRIMA REPORT</span><div>${inlineData[box.dataset.matchInlinePreview] || ''}</div>`
+        })
+      }
+      const formationSelect=form.elements.formation
+      const customFormationField = matchEditor.querySelector('[data-custom-formation]')
+      const opponentFormationsRoot = matchEditor.querySelector('[data-opponent-formations]')
+      const addOpponentFormationButton = matchEditor.querySelector('[data-add-opponent-formation]')
+      let opponentFormationCount = 0
+      const addOpponentFormation = (data = {}) => {
+        if (!opponentFormationsRoot || opponentFormationCount >= 6) return
+        const index = opponentFormationCount++
+        const card = document.createElement('article')
+        card.className = 'opponent-formation-card'
+        card.dataset.opponentFormation = String(index)
+        card.innerHTML = `<div class="opponent-formation-card-head"><strong>${index === 0 ? 'Sistema iniziale' : `Cambio sistema ${index}`}</strong>${index === 0 ? '' : '<button type="button" data-remove-opponent-formation aria-label="Rimuovi">×</button>'}</div><div class="opponent-formation-fields"><label><span>Sistema</span><select name="opponent_system_${index}">${formationOptionsHtml(data.system || '4-4-2')}</select></label><label><span>${index === 0 ? 'Minuto iniziale' : 'Dal minuto'}</span><input type="number" min="0" max="130" name="opponent_system_minute_${index}" value="${escape(data.minute ?? (index === 0 ? 0 : ''))}"></label></div><label><span>Note sul sistema</span><textarea name="opponent_system_note_${index}" rows="3">${escape(data.note || '')}</textarea></label>`
+        card.querySelector('[data-remove-opponent-formation]')?.addEventListener('click', () => { card.remove(); scheduleSave(); renderReport() })
+        opponentFormationsRoot.appendChild(card)
+        const systemSelect = card.querySelector(`[name="opponent_system_${index}"]`)
+        systemSelect?.addEventListener('change', () => { if (index === 0) updateOpponentPitch(systemSelect.value); scheduleSave(); renderReport() })
+        if (index === 0) updateOpponentPitch(systemSelect?.value || '4-4-2')
+      }
+      addOpponentFormationButton?.addEventListener('click', () => { addOpponentFormation(); scheduleSave() })
+      const syncCustomFormation = () => {
+        const isCustom = formationSelect.value === 'Personalizzato'
+        customFormationField.hidden = !isCustom
+        if (!isCustom) form.elements.custom_formation.value = ''
+      }
+      formationSelect.addEventListener('change',()=>{
+        syncCustomFormation()
+        applyFormation(formationSelect.value)
+      })
+      form.elements.custom_formation.addEventListener('change',()=>{
+        if (formationSelect.value === 'Personalizzato') applyFormation('Personalizzato')
+      })
+      matchEditor.querySelector('[data-reset-formation]')?.addEventListener('click',()=>{
+        for (let i = 0; i < 11; i += 1) setTokenPosition(i, 50, 50, false)
+        scheduleSave()
+      })
+      const updateOpponentTokenStyle = () => {
+        const primary = form.elements.opponent_token_primary?.value || '#9f1239'
+        const secondary = form.elements.opponent_token_secondary?.value || '#f8fafc'
+        const pattern = form.elements.opponent_token_pattern?.value || 'solid'
+        matchEditor.style.setProperty('--opponent-token-primary', primary)
+        matchEditor.style.setProperty('--opponent-token-secondary', secondary)
+        matchEditor.dataset.opponentTokenPattern = pattern
+      }
+      form.elements.notes_mode.addEventListener('change',()=>{renderNotes();scheduleSave()})
+      form.addEventListener('input',()=>{updateTokens();updateOpponentTokenStyle();renderReport();scheduleSave()})
+      form.addEventListener('change',()=>{updateTokens();updateOpponentTokenStyle();renderReport();scheduleSave()})
+      next.addEventListener('click',()=>showStep(activeStep+1)); prev.addEventListener('click',()=>showStep(activeStep-1)); stepButtons.forEach(b=>b.addEventListener('click',()=>showStep(b.dataset.matchStepButton)))
+      matchEditor.querySelector('[data-match-reset]').addEventListener('click',()=>{if(confirm('Cancellare la Match Sheet?')){form.reset();localStorage.removeItem(storageKey);syncCustomFormation();applyFormation(form.elements.formation.value,false);renderNotes();updateTokens();showStep(1)}})
+      const fileInput=form.elements.opponent_sheet; fileInput.addEventListener('change',()=>{const file=fileInput.files?.[0]; const img=matchEditor.querySelector('[data-opponent-sheet-preview]'); if(file){img.src=URL.createObjectURL(file);img.hidden=false}})
+      const printMatchReport = (paper) => {
+        const printWindow = window.open('', '_blank', 'width=1100,height=900')
+        if (!printWindow) {
+          if (state) state.textContent = 'Il browser ha bloccato la finestra di stampa. Consenti i popup e riprova.'
+          return
+        }
+        const styleMarkup = [...document.querySelectorAll('link[rel="stylesheet"], style')]
+          .map((node) => node.outerHTML)
+          .join('')
+        const doc = printWindow.document
+        doc.open()
+        doc.write(`<!doctype html><html><head><meta charset="utf-8"><base href="${location.origin}/"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Match Report</title>${styleMarkup}</head><body class="match-print-body">${paper.outerHTML}</body></html>`)
+        doc.close()
+
+        const waitForAssets = async () => {
+          try { await doc.fonts?.ready } catch {}
+          const images = [...doc.images]
+          await Promise.all(images.map((image) => image.complete
+            ? Promise.resolve()
+            : new Promise((resolve) => {
+                image.addEventListener('load', resolve, { once: true })
+                image.addEventListener('error', resolve, { once: true })
+              })))
+          await new Promise((resolve) => printWindow.requestAnimationFrame(() => printWindow.requestAnimationFrame(resolve)))
+          await new Promise((resolve) => window.setTimeout(resolve, 250))
+        }
+
+        const runPrint = async () => {
+          await waitForAssets()
+          printWindow.focus()
+          printWindow.addEventListener('afterprint', () => printWindow.close(), { once: true })
+          printWindow.print()
+        }
+        if (doc.readyState === 'complete') runPrint()
+        else printWindow.addEventListener('load', runPrint, { once: true })
+      }
+      const openMatchReportPreview = () => {
+        renderReport()
+        const paper = matchEditor.querySelector('.match-report-paper')
+        if (!paper) {
+          if (state) state.textContent = 'Report non disponibile'
+          return
+        }
+        document.querySelector('[data-match-report-dialog]')?.remove()
+        const dialog = document.createElement('div')
+        dialog.className = 'match-report-dialog'
+        dialog.dataset.matchReportDialog = ''
+        dialog.innerHTML = `<section class="match-report-dialog-panel" role="dialog" aria-modal="true" aria-label="Anteprima Match Report"><header><div><span>ANTEPRIMA DI STAMPA</span><h2>Match Report</h2></div><button type="button" data-close-match-report aria-label="Chiudi">×</button></header><div class="match-report-dialog-body">${paper.outerHTML}</div><footer><button type="button" class="secondary-button" data-close-match-report>Annulla</button><button type="button" class="primary-button" data-confirm-match-report>Stampa / salva PDF</button></footer></section>`
+        document.body.appendChild(dialog)
+        document.body.classList.add('modal-open')
+        const close = () => { dialog.remove(); document.body.classList.remove('modal-open') }
+        dialog.querySelectorAll('[data-close-match-report]').forEach((button) => button.addEventListener('click', close))
+        dialog.addEventListener('click', (event) => { if (event.target === dialog) close() })
+        dialog.querySelector('[data-confirm-match-report]')?.addEventListener('click', () => {
+          const printable = dialog.querySelector('.match-report-paper')
+          if (printable) printMatchReport(printable)
+        })
+      }
+      pdf.addEventListener('click', openMatchReportPreview)
+      try {
+        const saved=JSON.parse(localStorage.getItem(storageKey)||'null')
+        if(saved){
+          const inferIndexes = (pattern) => Object.keys(saved).filter((key) => pattern.test(key)).map((key) => Number(key.match(/\d+/)?.[0])).filter(Number.isFinite).sort((a,b)=>a-b)
+          const subIndexes = inferIndexes(/^sub_minute_\d+$/)
+          const goalIndexes = inferIndexes(/^goal_minute_\d+$/)
+          const cardIndexes = inferIndexes(/^card_minute_\d+$/)
+          ;(subIndexes.length ? subIndexes : [0]).forEach((index)=>addEventRow('substitution',{minute:saved[`sub_minute_${index}`],out:saved[`sub_out_${index}`],in:saved[`sub_in_${index}`],reason:saved[`sub_reason_${index}`]}))
+          ;(goalIndexes.length ? goalIndexes : [0]).forEach((index)=>addEventRow('goal',{minute:saved[`goal_minute_${index}`],scorer:saved[`scorer_${index}`],assist:saved[`assist_${index}`]}))
+          ;(cardIndexes.length ? cardIndexes : [0]).forEach((index)=>addEventRow('card',{minute:saved[`card_minute_${index}`],player:saved[`card_player_${index}`],cardType:saved[`card_type_${index}`]}))
+          const savedOpponentIndexes = Object.keys(saved).filter((key)=>/^opponent_system_\d+$/.test(key)).map((key)=>Number(key.match(/\d+/)[0])).sort((a,b)=>a-b)
+          opponentFormationsRoot.innerHTML = ''
+          opponentFormationCount = 0
+          if (savedOpponentIndexes.length) savedOpponentIndexes.forEach((index)=>addOpponentFormation({system:saved[`opponent_system_${index}`],minute:saved[`opponent_system_minute_${index}`],note:saved[`opponent_system_note_${index}`]}))
+          else addOpponentFormation()
+          Object.entries(saved).forEach(([k,v])=>{const f=form.elements.namedItem(k);if(!f||f.type==='file')return;if(f.type==='checkbox')f.checked=v===true||v==='true'||v==='on';else f.value=v})
+          for (let i=0;i<11;i+=1) {
+            if (saved[`opponent_position_x_${i}`] !== undefined && saved[`opponent_position_y_${i}`] !== undefined) setOpponentTokenPosition(i, saved[`opponent_position_x_${i}`], saved[`opponent_position_y_${i}`], false)
+          }
+          hasSavedTokenPositions = Array.from({length:11},(_,i)=>`position_x_${i}`).every((key)=>saved[key] !== undefined) && Array.from({length:11},(_,i)=>`position_y_${i}`).every((key)=>saved[key] !== undefined)
+        }
+      } catch {}
+      if (!eventContainers.substitution.children.length) addEventRow('substitution')
+      if (!eventContainers.goal.children.length) addEventRow('goal')
+      if (!eventContainers.card.children.length) addEventRow('card')
+      if (!opponentFormationsRoot.children.length) addOpponentFormation()
+      syncCustomFormation()
+      restoreTokenPositions()
+      bindTokenDragging()
+      bindOpponentTokenDragging()
+      autoAssignCoreRoles(); renderNotes(); updateTokens(); updateOpponentTokenStyle(); renderReport(); showStep(1)
+    }
+
     const manualEditor = root.querySelector('[data-ts-manual-editor]')
     if (manualEditor) {
       const form = manualEditor.querySelector('[data-ts-manual-form]')
@@ -2658,13 +3738,25 @@ export async function attachAppEvents(user) {
       const storageKey = 'nz-training-sheet-editor-v6-2'
       let phaseCount = 0
       let saveTimer = null
+      let currentEditingEventId = localStorage.getItem('nz-training-sheet-open-event-id') || ''
+      const rosterPlayers = getTrainingSheetRosterPlayers()
+      const rosterPlayerByCanonicalName = new Map(
+        rosterPlayers.map((player) => [player.canonicalName.toLocaleLowerCase('it-IT'), player]),
+      )
 
       const escape = (value='') => String(value).replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[char]))
+      const surnameOnly = (fullName = '') => {
+        const normalized = String(fullName).trim().replace(/\s+/g, ' ')
+        const matchingPlayer = rosterPlayerByCanonicalName.get(normalized.toLocaleLowerCase('it-IT'))
+        if (matchingPlayer?.surname) return matchingPlayer.surname
+        const parts = normalized.split(' ')
+        return parts.at(-1) || normalized
+      }
       const selectedPlayers = (type) => [...manualEditor.querySelectorAll(`[data-player-select="${type}"] input:checked`)].map(input => input.value)
       const selectedPillars = () => [...form.querySelectorAll('[name="pillars"]:checked')].map(input => input.value)
       const squadTotal = 0 || players.length
       const updatePresentCount = () => {
-        const unavailable = new Set([...selectedPlayers('absent'), ...selectedPlayers('injured')])
+        const unavailable = new Set([...selectedPlayers('absent'), ...selectedPlayers('injured'), ...selectedPlayers('differentiated')])
         const present = Math.max(0, squadTotal - unavailable.size)
         if (form.elements.present) form.elements.present.value = String(present)
         return present
@@ -2675,16 +3767,21 @@ export async function attachAppEvents(user) {
         phasesRoot.insertAdjacentHTML('beforeend', `
           <article class="ts-phase-editor" data-phase>
             <div class="ts-phase-editor-head"><strong>FASE ${index + 1}</strong><button type="button" data-remove-phase aria-label="Rimuovi">×</button></div>
-            <div class="ts-phase-compact">
-              <label class="ts-field"><span>Titolo</span><input name="phase_title_${index}" value="${escape(data.title || '')}" placeholder="Es. Attivazione, Gioco di posizione, Possesso"></label>
-              <label class="ts-field"><span>Durata</span><input name="phase_duration_${index}" type="number" min="1" value="${escape(data.duration || '')}" placeholder="10"></label>
-              <label class="ts-field"><span>Portieri</span><select name="phase_goalkeepers_${index}"><option value="no" ${(!data.goalkeepers || data.goalkeepers==='no')?'selected':''}>No</option><option value="yes" ${data.goalkeepers==='yes'?'selected':''}>Sì</option><option value="separate" ${data.goalkeepers==='separate'?'selected':''}>Lavoro separato</option></select></label>
+            <div class="ts-phase-layout">
+              <label class="ts-field ts-phase-title-field"><span>Titolo</span><input name="phase_title_${index}" value="${escape(data.title || '')}" placeholder="Es. Attivazione, Gioco di posizione, Possesso"></label>
+              <div class="ts-phase-meta-fields">
+                <label class="ts-field ts-phase-duration-field"><span>Durata</span><div class="ts-duration-input"><input name="phase_duration_${index}" type="number" min="1" value="${escape(data.duration || '')}" placeholder="10"><small>min</small></div></label>
+                <label class="ts-field ts-phase-goalkeepers-field"><span>Portieri</span><select name="phase_goalkeepers_${index}"><option value="no" ${(!data.goalkeepers || data.goalkeepers==='no')?'selected':''}>No</option><option value="yes" ${data.goalkeepers==='yes'?'selected':''}>Sì</option><option value="separate" ${data.goalkeepers==='separate'?'selected':''}>Lavoro separato</option></select></label>
+              </div>
             </div>
-            <label class="ts-field ts-field-full"><span>Descrizione esercitazione</span><textarea name="phase_description_${index}" rows="4" placeholder="Organizzazione, numeri, spazi, regole e obiettivi...">${escape(data.description || '')}</textarea></label>
-            <div class="ts-phase-compact two">
-              <label class="ts-field"><span>Varianti</span><textarea name="phase_variants_${index}" rows="2">${escape(data.variants || '')}</textarea></label>
-              <label class="ts-field"><span>Coaching point</span><textarea name="phase_coaching_${index}" rows="2">${escape(data.coaching || '')}</textarea></label>
-            </div>
+            <label class="ts-field ts-field-full"><span>Note</span><textarea name="phase_description_${index}" rows="4" placeholder="Organizzazione, numeri, spazi, regole, obiettivi e indicazioni operative...">${escape(data.description || '')}</textarea></label>
+            <details class="ts-phase-advanced" ${(data.variants || data.coaching) ? 'open' : ''}>
+              <summary>＋ Aggiungi varianti o coaching point</summary>
+              <div class="ts-phase-compact two">
+                <label class="ts-field"><span>Varianti</span><textarea name="phase_variants_${index}" rows="2">${escape(data.variants || '')}</textarea></label>
+                <label class="ts-field"><span>Coaching point</span><textarea name="phase_coaching_${index}" rows="2">${escape(data.coaching || '')}</textarea></label>
+              </div>
+            </details>
           </article>
         `)
         phasesRoot.lastElementChild.querySelector('[data-remove-phase]').addEventListener('click', (event) => {
@@ -2704,7 +3801,7 @@ export async function attachAppEvents(user) {
           return { title, duration, goalkeepers, description, variants, coaching }
         })
         return {
-          date: fd.get('date') || '', time: fd.get('time') || '', location: fd.get('location') === '__custom__' ? (fd.get('custom_location') || '') : (fd.get('location') || ''), progressive: fd.get('progressive') || '', present: updatePresentCount(), focus: fd.get('focus') || '', match_day: fd.get('match_day') || '', intensity: fd.get('intensity') || '', volume: fd.get('volume') || '', objective: fd.get('objective') || '', principles: fd.get('principles') || '', pillars: selectedPillars(), absent: selectedPlayers('absent'), injured: selectedPlayers('injured'), phases
+          date: fd.get('date') || '', time: fd.get('time') || '', location: fd.get('location') === '__custom__' ? (fd.get('custom_location') || '') : (fd.get('location') || ''), progressive: fd.get('progressive') || '', present: updatePresentCount(), focus: fd.get('focus') || '', match_day: fd.get('match_day') || '', intensity: fd.get('intensity') || '', volume: fd.get('volume') || '', objective: fd.get('objective') || '', principles: fd.get('principles') || '', pillars: selectedPillars(), absent: selectedPlayers('absent'), injured: selectedPlayers('injured'), differentiated: selectedPlayers('differentiated'), aggregated: selectedPlayers('aggregated'), phases
         }
       }
 
@@ -2743,9 +3840,9 @@ export async function attachAppEvents(user) {
           <div class="ts-paper-meta"><span><small>Data</small><b>${escape(formattedDate)}</b></span><span><small>Ora</small><b>${escape(d.time || '—')}</b></span><span><small>Campo</small><b>${escape(d.location || '—')}</b></span><span><small>Presenti</small><b>${escape(d.present || '—')}</b></span><span class="ts-paper-md ts-md-${escape((d.match_day || 'none').replace('+','plus').replace('-','minus').toLowerCase())}">${escape(d.match_day || 'MD —')}</span></div>
           <div class="ts-paper-load"><span><small>Focus fisico</small><b>${escape(d.focus || '—')}</b></span><span><small>Intensità</small>${bar(d.intensity)}</span><span><small>Volume</small>${bar(d.volume)}</span><span><small>Durata</small><b>${total || '—'}'</b></span></div>
           <section class="ts-paper-pillars">${['Creare il vantaggio','Conservare il vantaggio','Sfruttare il vantaggio','Difendere il vantaggio'].map((p,i)=>`<span class="pillar-${i+1} ${d.pillars.includes(p)?'is-selected':'is-muted'}">${escape(p)}</span>`).join('')}</section>
-          <section class="ts-paper-roster"><div><small>ASSENTI</small><p>${d.absent.length?d.absent.map(n=>`<span>${escape(n)}</span>`).join(''):'<em>Nessuno</em>'}</p></div><div class="inj"><small>INFORTUNATI</small><p>${d.injured.length?d.injured.map(n=>`<span>${escape(n)}</span>`).join(''):'<em>Nessuno</em>'}</p></div></section>
+          <section class="ts-paper-roster ts-paper-roster--four"><div><small>ASSENTI</small><p>${d.absent.length?d.absent.map(n=>`<span>${escape(surnameOnly(n))}</span>`).join(''):'<em>Nessuno</em>'}</p></div><div class="inj"><small>INFORTUNATI</small><p>${d.injured.length?d.injured.map(n=>`<span>${escape(surnameOnly(n))}</span>`).join(''):'<em>Nessuno</em>'}</p></div><div class="diff"><small>DIFFERENZIATO</small><p>${d.differentiated?.length?d.differentiated.map(n=>`<span>${escape(surnameOnly(n))}</span>`).join(''):'<em>Nessuno</em>'}</p></div><div class="agg"><small>AGGREGATI</small><p>${d.aggregated?.length?d.aggregated.map(n=>`<span>${escape(surnameOnly(n))}</span>`).join(''):'<em>Nessuno</em>'}</p></div></section>
           <section class="ts-paper-objectives"><div><small>OBIETTIVO</small><p>${escape(d.objective || 'Da definire')}</p></div><div><small>PRINCIPI</small><p>${escape(d.principles || 'Da definire')}</p></div></section>
-          <section class="ts-paper-body"><div class="ts-paper-phases">${d.phases.length ? d.phases.map((p,i)=>`<article><div><b>${String(i+1).padStart(2,'0')}</b><strong>FASE ${i+1}${p.title?` · ${escape(p.title)}`:''}</strong><span class="ts-phase-gk">Portieri: ${p.goalkeepers==='yes'?'Sì':p.goalkeepers==='separate'?'Separati':'No'}</span><span>${escape(p.duration || '—')}'</span></div><p>${escape(p.description || 'Descrizione da completare')}</p>${p.variants?`<small><b>Varianti:</b> ${escape(p.variants)}</small>`:''}${p.coaching?`<small><b>Coaching point:</b> ${escape(p.coaching)}</small>`:''}</article>`).join('') : '<p class="ts-paper-empty">Aggiungi la prima fase.</p>'}</div></section>
+          <section class="ts-paper-body"><div class="ts-paper-phases">${d.phases.length ? d.phases.map((p,i)=>`<article><div class="ts-paper-phase-head"><b>${String(i+1).padStart(2,'0')}</b><strong>FASE ${i+1}${p.title?` · ${escape(p.title)}`:''}</strong><div class="ts-paper-phase-meta"><span class="ts-phase-gk">Portieri: ${p.goalkeepers==='yes'?'Sì':p.goalkeepers==='separate'?'Separati':'No'}</span><span class="ts-phase-duration">${escape(p.duration || '—')}'</span></div></div><p>${escape(p.description || 'Descrizione da completare')}</p>${p.variants?`<small><b>Varianti:</b> ${escape(p.variants)}</small>`:''}${p.coaching?`<small><b>Coaching point:</b> ${escape(p.coaching)}</small>`:''}</article>`).join('') : '<p class="ts-paper-empty">Aggiungi la prima fase.</p>'}</div></section>
           </div>
         `
         requestAnimationFrame(fitPreviewToViewport)
@@ -2760,34 +3857,111 @@ export async function attachAppEvents(user) {
         if (draftState) draftState.textContent = 'Salvataggio…'
         clearTimeout(saveTimer); saveTimer = setTimeout(saveDraft, 450)
       }
-      const restore = () => {
-        const raw = localStorage.getItem(storageKey)
-        phasesRoot.innerHTML = ''
-        phaseCount = 0
-        form.querySelectorAll('[name="pillars"]').forEach((input) => { input.checked = false })
-        manualEditor.querySelectorAll('[data-player-select] input').forEach((input) => { input.checked = false })
-        if (!raw) { addPhase(); updateCounts(); updatePreview(); return }
-        try {
-          const d = JSON.parse(raw)
-          Object.entries(d).forEach(([key,value]) => { const field=form.elements.namedItem(key); if(field && !Array.isArray(value)) field.value=value ?? '' })
-          d.phases?.length ? d.phases.forEach(addPhase) : addPhase()
-          d.pillars?.forEach((value) => { const el=[...form.querySelectorAll('[name="pillars"]')].find((input)=>input.value===value); if(el) el.checked=true })
-          const normalize = (value='') => String(value).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('it-IT').replace(/[^a-z0-9]/g,'')
-          ;['absent','injured'].forEach((type) => d[type]?.forEach((value) => {
-            const el=[...manualEditor.querySelectorAll(`[data-player-select="${type}"] input`)].find((input)=>normalize(input.value)===normalize(value) || normalize(input.dataset.canonicalName)===normalize(value))
-            if(el) el.checked=true
-          }))
-          manualEditor.querySelectorAll('[data-md]').forEach((button)=>button.classList.toggle('is-active',button.dataset.md===d.match_day))
-          manualEditor.querySelectorAll('[data-rating]').forEach((group)=>group.querySelectorAll('button').forEach((button)=>button.classList.toggle('is-active',Number(button.dataset.value)<=Number(d[group.dataset.rating]||0))))
-          updateCounts(); updatePreview()
-        } catch (error) { console.warn('Bozza TS non leggibile:', error); addPhase(); updateCounts(); updatePreview() }
-      }
       const updateCounts = () => {
-        manualEditor.querySelectorAll('[data-player-select]').forEach(box=>{
-          const count=box.querySelectorAll('input:checked').length
-          box.querySelector('[data-count]').textContent=`${count} selezionati`
+        manualEditor.querySelectorAll('[data-player-select]').forEach((box) => {
+          const count = box.querySelectorAll('input:checked').length
+          const counter = box.querySelector('[data-count]')
+          if (counter) counter.textContent = `${count} selezionati`
         })
         updatePresentCount()
+      }
+
+      const normalizePlayerValue = (value = '') => String(value)
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLocaleLowerCase('it-IT')
+        .replace(/[^a-z0-9]/g, '')
+
+      const normalizePlayerTokens = (value = '') => String(value)
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLocaleLowerCase('it-IT')
+        .split(/[^a-z0-9]+/)
+        .filter(Boolean)
+        .sort()
+        .join('|')
+
+      const applyTrainingSheetData = (data = {}) => {
+        const d = data && typeof data === 'object' ? data : {}
+
+        phasesRoot.innerHTML = ''
+        phaseCount = 0
+        form.reset()
+        form.querySelectorAll('[name="pillars"]').forEach((input) => { input.checked = false })
+        manualEditor.querySelectorAll('[data-player-select] input').forEach((input) => { input.checked = false })
+
+        const location = String(d.location || 'Mezzolara').trim() || 'Mezzolara'
+        if (['Mezzolara', 'Budrio'].includes(location)) {
+          form.elements.location.value = location
+          if (form.elements.custom_location) form.elements.custom_location.value = ''
+        } else {
+          form.elements.location.value = '__custom__'
+          if (form.elements.custom_location) form.elements.custom_location.value = location
+        }
+        syncTsLocation()
+
+        const scalarFields = ['date', 'time', 'progressive', 'focus', 'objective', 'principles']
+        scalarFields.forEach((fieldName) => {
+          const field = form.elements.namedItem(fieldName)
+          if (field) field.value = d[fieldName] ?? ''
+        })
+        if (!form.elements.time.value) form.elements.time.value = '17:30'
+
+        const matchDay = d.match_day || d.matchDay || ''
+        if (form.elements.match_day) form.elements.match_day.value = matchDay
+
+        const phases = Array.isArray(d.phases) ? d.phases : []
+        phases.length ? phases.forEach(addPhase) : addPhase()
+
+        const pillars = Array.isArray(d.pillars) ? d.pillars : []
+        pillars.forEach((value) => {
+          const input = [...form.querySelectorAll('[name="pillars"]')].find((candidate) => candidate.value === value)
+          if (input) input.checked = true
+        })
+
+        ;['absent', 'injured', 'differentiated', 'aggregated'].forEach((type) => {
+          const values = Array.isArray(d[type]) ? d[type] : []
+          values.forEach((value) => {
+            const normalizedValue = normalizePlayerValue(value)
+            const tokenizedValue = normalizePlayerTokens(value)
+            const input = [...manualEditor.querySelectorAll(`[data-player-select="${type}"] input`)].find((candidate) =>
+              normalizePlayerValue(candidate.value) === normalizedValue ||
+              normalizePlayerValue(candidate.dataset.canonicalName) === normalizedValue ||
+              normalizePlayerTokens(candidate.dataset.canonicalName) === tokenizedValue
+            )
+            if (input) input.checked = true
+          })
+        })
+
+        manualEditor.querySelectorAll('[data-md]').forEach((button) => {
+          button.classList.toggle('is-active', button.dataset.md === matchDay)
+        })
+        manualEditor.querySelectorAll('[data-rating]').forEach((group) => {
+          const value = Number(d[group.dataset.rating] || 0)
+          const hiddenInput = group.querySelector('input')
+          if (hiddenInput) hiddenInput.value = value || ''
+          group.querySelectorAll('button').forEach((button) => {
+            button.classList.toggle('is-active', Number(button.dataset.value) <= value)
+          })
+        })
+
+        updateCounts()
+        updatePreview()
+      }
+
+      const restore = () => {
+        const raw = localStorage.getItem(storageKey)
+        if (!raw) {
+          applyTrainingSheetData({ time: '17:30', location: 'Mezzolara' })
+          return
+        }
+        try {
+          applyTrainingSheetData(JSON.parse(raw))
+        } catch (error) {
+          console.warn('Bozza TS non leggibile:', error)
+          localStorage.removeItem(storageKey)
+          applyTrainingSheetData({ time: '17:30', location: 'Mezzolara' })
+        }
       }
 
       manualEditor.querySelector('[data-add-phase]')?.addEventListener('click',()=>{addPhase();updatePreview();scheduleSave()})
@@ -2871,14 +4045,32 @@ export async function attachAppEvents(user) {
         if (button.querySelector('span')) button.querySelector('span').textContent = 'Creazione…'
         if (note) note.textContent = 'Creazione e pubblicazione della Training Sheet…'
         try {
-          const canvas = await window.html2canvas(preview, {
-            scale: 2,
-            useCORS: true,
-            backgroundColor: '#ffffff',
-            logging: false,
-            width: preview.scrollWidth,
-            height: preview.scrollHeight,
-          })
+          const captureRoot = document.createElement('div')
+          captureRoot.className = 'ts-capture-root'
+          const capturePaper = preview.cloneNode(true)
+          capturePaper.classList.add('ts-paper--capture')
+          capturePaper.style.width = '794px'
+          capturePaper.style.minWidth = '794px'
+          capturePaper.style.maxWidth = '794px'
+          capturePaper.style.transform = 'none'
+          capturePaper.style.margin = '0'
+          captureRoot.appendChild(capturePaper)
+          document.body.appendChild(captureRoot)
+          let canvas
+          try {
+            await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+            canvas = await window.html2canvas(capturePaper, {
+              scale: 2,
+              useCORS: true,
+              backgroundColor: '#ffffff',
+              logging: false,
+              width: 794,
+              height: capturePaper.scrollHeight,
+              windowWidth: 1280,
+            })
+          } finally {
+            captureRoot.remove()
+          }
           const { jsPDF } = window.jspdf
           const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true })
           const pageWidth = 210
@@ -2892,8 +4084,9 @@ export async function attachAppEvents(user) {
           pdf.addImage(canvas.toDataURL('image/jpeg', .96), 'JPEG', (pageWidth-finalWidth)/2, margin, finalWidth, finalHeight, undefined, 'FAST')
           const blob = pdf.output('blob')
           const progressive = String(Number(d.progressive || 1)).padStart(3, '0')
-          const safeDate = d.date.replaceAll('-', '')
-          const fileName = `ALL_${progressive}_${safeDate}.pdf`
+          const [year, month, day] = d.date.split('-')
+          const safeDate = `${day || ''}${month || ''}${year || ''}`
+          const fileName = `ALL_${progressive} - ${safeDate}.pdf`
           const filePath = `${d.date}/${fileName}`
 
           if (note) note.textContent = 'Controlla l’anteprima e conferma il salvataggio.'
@@ -2904,11 +4097,12 @@ export async function attachAppEvents(user) {
           }
           if (note) note.textContent = 'Salvataggio e collegamento al Calendario…'
 
-          const existingEvent = calendarEvents.find((event) => {
-            if (!isTrainingEventType(event.type)) return false
-            const localDate = new Date(event.startAt).toLocaleDateString('sv-SE')
-            return localDate === d.date
-          })
+          const existingEvent = calendarEvents.find((event) => String(event.id) === String(currentEditingEventId))
+            || calendarEvents.find((event) => {
+              if (!isTrainingEventType(event.type)) return false
+              const localDate = new Date(event.startAt).toLocaleDateString('sv-SE')
+              return localDate === d.date
+            })
 
           const upload = await supabase.storage.from('training-sheets').upload(filePath, blob, {
             contentType: 'application/pdf', cacheControl: '3600', upsert: true,
@@ -2949,6 +4143,12 @@ export async function attachAppEvents(user) {
       const resetEditor = () => {
         if (!window.confirm('Vuoi cancellare tutti i campi della Training Sheet Editor?')) return
         localStorage.removeItem(storageKey)
+        localStorage.removeItem('nz-training-sheet-open-event-id')
+        currentEditingEventId = ''
+        const openSheetSelect = manualEditor.querySelector('[data-open-training-sheet]')
+        const openSheetButton = manualEditor.querySelector('[data-open-training-sheet-button]')
+        if (openSheetSelect) openSheetSelect.value = ''
+        if (openSheetButton) openSheetButton.disabled = true
         form.reset()
         form.elements.time.value = '17:30'
         form.elements.location.value = 'Mezzolara'
@@ -2969,36 +4169,125 @@ export async function attachAppEvents(user) {
       }
       manualEditor.querySelector('[data-reset-training-sheet]')?.addEventListener('click', resetEditor)
 
-      manualEditor.querySelector('[data-open-training-sheet]')?.addEventListener('change', (event) => {
-        const selected = calendarEvents.find((item) => item.id === event.target.value)
-        if (!selected) return
-        const savedKey = selected.trainingSheetPath ? `nz-training-sheet:${selected.trainingSheetPath}` : ''
-        const saved = selected.editorData ? JSON.stringify(selected.editorData) : (savedKey ? localStorage.getItem(savedKey) : null)
-        if (saved) {
-          localStorage.setItem(storageKey, saved)
-          restore()
-        } else {
-          form.elements.date.value = new Date(selected.startAt).toLocaleDateString('sv-SE')
-          form.elements.time.value = selected.time || '17:30'
-          const selectedPlace = selected.place || 'Mezzolara'
-          if (['Mezzolara','Budrio'].includes(selectedPlace)) {
-            form.elements.location.value = selectedPlace
-            if (form.elements.custom_location) form.elements.custom_location.value = ''
-          } else {
-            form.elements.location.value = '__custom__'
-            if (form.elements.custom_location) form.elements.custom_location.value = selectedPlace
-          }
-          syncTsLocation()
-          form.elements.match_day.value = selected.matchDay || ''
-          form.elements.progressive.value = String(Number(selected.trainingSheetPath?.match(/(?:ALL|AL)[_-]?(\d{1,3})/i)?.[1] || determineNextProgressive()))
-          manualEditor.querySelectorAll('[data-md]').forEach((button) => button.classList.toggle('is-active', button.dataset.md === selected.matchDay))
-          updatePreview(); scheduleSave()
-        }
-        if (draftState) draftState.textContent = 'Training Sheet aperta'
-      })
+      const openSheetSelect = manualEditor.querySelector('[data-open-training-sheet]')
+      const openSheetButton = manualEditor.querySelector('[data-open-training-sheet-button]')
 
-      manualEditor.querySelector('[data-print-sheet]')?.addEventListener('click', createAndPublishPdf)
+      const loadTrainingSheetByEventId = async (eventId) => {
+        if (!eventId) return false
+        if (draftState) draftState.textContent = 'Apertura Training Sheet…'
+        if (openSheetButton) openSheetButton.disabled = true
+
+        try {
+          let selected = calendarEvents.find((item) => String(item.id) === String(eventId))
+
+          // Lettura diretta come fallback: evita che cache o lista eventi non aggiornata
+          // impediscano di riaprire una Training Sheet appena pubblicata.
+          if (!selected?.editorData && supabase) {
+            const { data: rawEvent, error } = await supabase
+              .from('events')
+              .select('*')
+              .eq('id', eventId)
+              .maybeSingle()
+
+            if (!error && rawEvent) {
+              let parsedNotes = {}
+              try { parsedNotes = JSON.parse(rawEvent.notes || '{}') } catch { parsedNotes = {} }
+              selected = {
+                ...(selected || {}),
+                id: rawEvent.id,
+                startAt: rawEvent.start_at,
+                time: new Date(rawEvent.start_at).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }),
+                place: rawEvent.location || '',
+                matchDay: rawEvent.match_day || null,
+                trainingSheetPath: rawEvent.training_sheet_path || null,
+                editorData: parsedNotes?.type === 'training_sheet_editor' ? parsedNotes.data : null,
+              }
+            }
+          }
+
+          if (!selected) throw new Error('Training Sheet non trovata nel Calendario.')
+
+          const savedKey = selected.trainingSheetPath ? `nz-training-sheet:${selected.trainingSheetPath}` : ''
+          const localSaved = savedKey ? localStorage.getItem(savedKey) : null
+          let parsedLocalData = null
+          if (localSaved) {
+            try { parsedLocalData = JSON.parse(localSaved) } catch { parsedLocalData = null }
+          }
+          const rawSourceData = selected.editorData || parsedLocalData
+          const normalizeLoadedData = (source = {}) => ({
+            date: source.date || new Date(selected.startAt).toLocaleDateString('sv-SE'),
+            time: source.time || selected.time || '17:30',
+            location: source.location || selected.place || 'Mezzolara',
+            progressive: source.progressive || selected.trainingSheetPath?.match(/(?:ALL|AL)[_-]?(\d{1,3})/i)?.[1] || determineNextProgressive(),
+            present: source.present ?? selected.presentCount ?? squadTotal,
+            focus: source.focus || '',
+            match_day: source.match_day || source.matchDay || selected.matchDay || '',
+            intensity: source.intensity || '',
+            volume: source.volume || '',
+            objective: source.objective || '',
+            principles: source.principles || '',
+            pillars: Array.isArray(source.pillars) ? source.pillars : [],
+            absent: Array.isArray(source.absent) ? source.absent : (Array.isArray(source.absences?.absent) ? source.absences.absent : []),
+            injured: Array.isArray(source.injured) ? source.injured : (Array.isArray(source.absences?.injured) ? source.absences.injured : []),
+            differentiated: Array.isArray(source.differentiated) ? source.differentiated : [],
+            aggregated: Array.isArray(source.aggregated) ? source.aggregated : [],
+            phases: Array.isArray(source.phases) ? source.phases.map((phase = {}) => ({
+              title: phase.title || '',
+              duration: phase.duration ?? phase.duration_minutes ?? '',
+              goalkeepers: phase.goalkeepers === true ? 'yes' : phase.goalkeepers === false ? 'no' : (phase.goalkeepers || 'no'),
+              description: phase.description || phase.notes || '',
+              variants: phase.variants || '',
+              coaching: phase.coaching || phase.coaching_points || '',
+            })) : [],
+          })
+          const sourceData = rawSourceData ? normalizeLoadedData(rawSourceData) : null
+
+          if (sourceData) {
+            currentEditingEventId = String(selected.id)
+            applyTrainingSheetData(sourceData)
+            localStorage.setItem(storageKey, JSON.stringify(collect()))
+          } else {
+            // Compatibilità con PDF storici: ripristina almeno i dati disponibili,
+            // senza fingere di poter ricostruire contenuti mai salvati come JSON.
+            applyTrainingSheetData({
+              date: new Date(selected.startAt).toLocaleDateString('sv-SE'),
+              time: selected.time || '17:30',
+              location: selected.place || 'Mezzolara',
+              match_day: selected.matchDay || '',
+              progressive: String(Number(selected.trainingSheetPath?.match(/(?:ALL|AL)[_-]?(\d{1,3})/i)?.[1] || determineNextProgressive())),
+              phases: [{}],
+            })
+            saveDraft()
+            if (draftState) draftState.textContent = 'TS storica: disponibili solo i dati archiviati'
+            return true
+          }
+
+          currentEditingEventId = String(selected.id)
+          localStorage.setItem('nz-training-sheet-open-event-id', currentEditingEventId)
+          if (openSheetSelect) openSheetSelect.value = String(selected.id)
+          if (draftState) draftState.textContent = 'Training Sheet aperta'
+          return true
+        } catch (error) {
+          console.error('Errore apertura Training Sheet:', error)
+          if (draftState) draftState.textContent = error?.message || 'Impossibile aprire la Training Sheet'
+          return false
+        } finally {
+          if (openSheetButton) openSheetButton.disabled = !openSheetSelect?.value
+        }
+      }
+
+      openSheetSelect?.addEventListener('change', () => {
+        if (openSheetButton) openSheetButton.disabled = !openSheetSelect.value
+      })
+      openSheetButton?.addEventListener('click', () => loadTrainingSheetByEventId(openSheetSelect?.value))
+
+      manualEditor.querySelectorAll('[data-print-sheet]').forEach((button) => button.addEventListener('click', createAndPublishPdf))
       restore()
+
+      const pendingOpenEventId = localStorage.getItem('nz-training-sheet-open-event-id')
+      if (pendingOpenEventId && calendarEvents.some((item) => String(item.id) === String(pendingOpenEventId))) {
+        loadTrainingSheetByEventId(pendingOpenEventId)
+      }
       const nextProgressive = determineNextProgressive()
       if (form.elements.progressive && Number(form.elements.progressive.value || 0) < nextProgressive) {
         form.elements.progressive.value = String(nextProgressive)
@@ -3167,6 +4456,61 @@ export async function attachAppEvents(user) {
       if (count) count.textContent = `${visible} osservazioni`
     })
 
+    const createStaffPanel = root.querySelector('[data-create-staff-form]')
+    const toggleCreateStaff = (open) => {
+      if (!createStaffPanel) return
+      createStaffPanel.hidden = !open
+      root.querySelector('[data-toggle-create-staff]')?.setAttribute('aria-expanded', String(open))
+      if (open) createStaffPanel.querySelector('input[name="first_name"]')?.focus()
+    }
+
+    root.querySelector('[data-toggle-create-staff]')?.addEventListener('click', () => toggleCreateStaff(createStaffPanel?.hidden !== false))
+    root.querySelector('[data-close-create-staff]')?.addEventListener('click', () => toggleCreateStaff(false))
+    root.querySelector('[data-cancel-create-staff]')?.addEventListener('click', () => {
+      createStaffPanel?.reset()
+      toggleCreateStaff(false)
+    })
+    root.querySelector('[data-generate-staff-password]')?.addEventListener('click', () => {
+      const input = createStaffPanel?.querySelector('input[name="password"]')
+      if (input) {
+        input.value = generateTemporaryPassword()
+        input.focus()
+        input.select()
+      }
+    })
+    createStaffPanel?.addEventListener('submit', async (event) => {
+      event.preventDefault()
+      const form = event.currentTarget
+      const message = form.querySelector('[data-create-staff-message]')
+      const submit = form.querySelector('button[type="submit"]')
+      const data = new FormData(form)
+      const teamId = getTeamProfile().id || null
+      submit.disabled = true
+      message.textContent = 'Creazione account in corso…'
+      message.className = 'form-message'
+      try {
+        const result = await createStaffUser({
+          teamId,
+          firstName: data.get('first_name')?.toString().trim(),
+          lastName: data.get('last_name')?.toString().trim(),
+          email: data.get('email')?.toString().trim(),
+          password: data.get('password')?.toString(),
+          role: data.get('role')?.toString(),
+          appRole: data.get('app_role')?.toString(),
+        })
+        staffFlashMessage = `${result.firstName} ${result.lastName} creato correttamente.`
+        form.reset()
+        await loadStaffProfiles()
+        root.innerHTML = staffManagementView()
+        bindDynamic()
+      } catch (error) {
+        message.textContent = error?.message || 'Creazione utente non riuscita.'
+        message.className = 'form-message is-error'
+      } finally {
+        submit.disabled = false
+      }
+    })
+
     root.querySelectorAll('[data-staff-form]').forEach((form) => {
       form.addEventListener('submit', async (event) => {
         event.preventDefault()
@@ -3177,7 +4521,8 @@ export async function attachAppEvents(user) {
           first_name: data.get('first_name')?.toString().trim() ?? '',
           last_name: data.get('last_name')?.toString().trim() ?? '',
           role: data.get('role')?.toString() ?? 'observer',
-          active: data.get('active') === 'on',
+          app_role: form.dataset.isOwner === 'true' ? 'owner' : (data.get('app_role')?.toString() ?? 'collaborator'),
+          active: form.dataset.isOwner === 'true' ? true : data.get('active') === 'on',
           updated_at: new Date().toISOString(),
         }
 
@@ -3186,6 +4531,7 @@ export async function attachAppEvents(user) {
           p_first_name: payload.first_name,
           p_last_name: payload.last_name,
           p_role: payload.role,
+          p_app_role: payload.app_role,
           p_active: payload.active,
         })
         if (error) {
@@ -3200,7 +4546,34 @@ export async function attachAppEvents(user) {
         if (userId === currentUser.id) {
           currentUserProfile = { ...currentUserProfile, ...payload }
           currentUserRole = payload.role
+          currentUserAppRole = payload.app_role
           syncProfileHeader()
+        }
+      })
+    })
+
+    root.querySelectorAll('[data-delete-staff-user]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const form = button.closest('[data-staff-form]')
+        const userId = form?.dataset.userId
+        const name = form?.querySelector('[data-staff-message]')?.closest('.staff-member-actions')?.querySelector('.staff-member-name')?.textContent?.trim() || 'questo utente'
+        if (!userId) return
+        const confirmed = window.confirm(`Eliminare definitivamente ${name}? L’utente perderà subito l’accesso al portale. Questa operazione non può essere annullata.`)
+        if (!confirmed) return
+        const message = form.querySelector('[data-staff-message]')
+        button.disabled = true
+        message.textContent = 'Eliminazione account in corso…'
+        message.className = 'form-message'
+        try {
+          await deleteStaffUser({ teamId: getTeamProfile().id || null, userId })
+          staffFlashMessage = `${name} eliminato correttamente.`
+          await loadStaffProfiles()
+          root.innerHTML = staffManagementView()
+          bindDynamic()
+        } catch (error) {
+          message.textContent = error?.message || 'Eliminazione utente non riuscita.'
+          message.className = 'form-message is-error'
+          button.disabled = false
         }
       })
     })

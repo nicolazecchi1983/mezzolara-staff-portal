@@ -11,7 +11,7 @@ import {
 } from './services/auth.js'
 
 import { renderLogin } from './components/login.js'
-import { renderApp, attachAppEvents } from './components/app.js'
+import { renderApp, attachAppEvents, prepareAppData } from './components/app.js'
 
 const app = document.querySelector('#app')
 
@@ -80,6 +80,7 @@ async function showDashboard() {
     return showLogin()
   }
 
+  await prepareAppData(user)
   app.innerHTML = renderApp(user)
 
   await attachAppEvents(user)

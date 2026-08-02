@@ -1,0 +1,14 @@
+V6.4.6 — REPORT E OUTPUT STABILE
+
+- Report Match Sheet: Sostituzioni, Gol/Assist e Sanzioni separati in tre riquadri.
+- Campo formazione del report ridimensionato e riequilibrato con la panchina.
+- Barre di sezione del report uniformate con gerarchia grafica più forte.
+- Corretto il flusso di stampa del Match Report: nuova finestra preparata con attesa di font e immagini prima della stampa.
+- Disponibilità Training Sheet (Assenti, Infortunati, Differenziato, Aggregati) resa compatta in una sola fascia.
+- Generazione PDF Training Sheet resa indipendente dal dispositivo tramite cattura di una copia a larghezza fissa.
+- Impaginazione TS mantenuta identica tra PC e smartphone.
+
+Controlli:
+- Sintassi JavaScript superata.
+- CSS bilanciato.
+- Build non eseguibile nel container: vite 8.1.5 non disponibile nel registro interno.

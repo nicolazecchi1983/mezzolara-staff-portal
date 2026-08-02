@@ -1,0 +1,15 @@
+V6.4.2 - Match Sheet: formazione, avversario e report
+
+- Campo tattico completato con porte.
+- Numerazione iniziale coerente con riferimenti calcistici tradizionali: 1 portiere, 2 terzino destro, 3 terzino sinistro, 4 davanti alla difesa, 5-6 centrali, 9 punta.
+- Precompilazione iniziale della formazione usando i ruoli presenti nella Rosa, senza sovrascrivere scelte già salvate.
+- RESET FORMAZIONE porta tutte le pedine al centro del campo.
+- Pedine sempre trascinabili liberamente e coordinate salvate nella bozza.
+- Report Match Sheet collegato alle sezioni: formazione grafica, panchina, sostituzioni, gol, assist, sanzioni, note, sistemi avversari e sintesi finale.
+- Nel report campo e riserve sono affiancati.
+- Squadra avversaria: sistema iniziale di default e pulsante + per aggiungere più cambi di sistema con minuto e note.
+- Note avversario divise in due colonne: fase di possesso e fase di non possesso.
+- Training Sheet: comandi TS pubblicate, Apri TS e Reset allineati; stato bozza spostato sotto in formato compatto.
+- Filigrana NZ centrale forzata orizzontale; rimane inclinato solo il pattern NICOLA ZECCHI.
+
+Non sono richieste query SQL.

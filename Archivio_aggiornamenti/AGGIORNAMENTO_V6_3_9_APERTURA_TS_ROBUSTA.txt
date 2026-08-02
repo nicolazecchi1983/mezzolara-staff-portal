@@ -1,0 +1,15 @@
+V6.3.9 — Apertura Training Sheet robusta e alleggerimento editor
+
+INTERVENTI
+- Corretto l'errore runtime "rosterPlayers is not defined".
+- Centralizzata la preparazione della Rosa usata dal Training Sheet Editor.
+- Eliminata la duplicazione della logica Nome/Cognome, reparto e ordinamento.
+- Indicizzazione dei giocatori per nome canonico tramite Map per rendere più rapido il rendering dei cognomi nella TS.
+- Introdotta una sola funzione applyTrainingSheetData per compilare form, fasi, pilastri, Match Day, carico, assenti e infortunati.
+- La stessa funzione viene ora usata per bozza locale, TS pubblicate e TS storiche.
+- L'apertura di una TS non dipende più dal passaggio indiretto localStorage -> restore.
+- Gestione sicura di JSON locale non valido.
+- Ripristino corretto dei campi personalizzati e dei pulsanti di intensità/volume.
+- Mantenuti tutti i fallback: dati calendario, Supabase, metadati editor e copia locale.
+
+NESSUN SQL RICHIESTO.

@@ -1,0 +1,12 @@
+NZ V6.4.7 — Match Sheet Flow & Report
+
+- Evento Riposo semplificato: solo campo Note nel form.
+- Match Sheet ridotta a 5 sezioni.
+- Squadra avversaria spostata subito dopo la propria formazione.
+- Anteprima progressiva del report sotto ogni sezione.
+- Report con due campi affiancati: Mezzolara e avversario.
+- Campo tattico del report ridimensionato.
+- Porte uniformate tra editor e report.
+- Punti di forza/criticità distribuiti nelle sezioni pertinenti.
+- Pulsanti Indietro/Continua/Azzera posizioni uniformati al design del portale.
+- Fascia disponibilità Training Sheet resa più compatta.

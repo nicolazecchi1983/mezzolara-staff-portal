@@ -1,0 +1,8 @@
+RELEASE A.1 - BRANDING FIX
+
+- Aggiunta anteprima pedina live per tinta unita, strisce verticali e orizzontali.
+- Persistenza locale separata per utente.
+- Recupero robusto del logo locale quando il record remoto non contiene ancora logo_url.
+- Controllo esplicito degli errori Supabase per team e membership.
+- Corretto il salvataggio del logo quando viene scelto un nuovo file.
+- Nessun nuovo SQL richiesto.
