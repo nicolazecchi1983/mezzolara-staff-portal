@@ -2,7 +2,49 @@ import { icon } from './icons.js'
 import { supabase } from '../supabase.js'
 import { getTeamProfile, loadTeamProfile, saveTeamProfile } from '../services/teamProfile.js'
 import { printHtmlDocument } from '../services/pdfService.js'
-import { createStaffUser, deleteStaffUser, generateTemporaryPassword } from '../services/staffAdmin.js'
+import {
+  createStaffUser,
+  deleteStaffUser,
+  generateTemporaryPassword,
+  loadTeamStaffProfiles,
+  updateStaffProfile,
+} from '../modules/staff/staffService.js'
+import {
+  createCalendarEvent,
+  deleteCalendarEvent,
+  getCalendarEvent,
+  listCalendarEvents,
+  updateCalendarEvent,
+} from '../modules/calendar/calendarService.js'
+import { accessLevelLabel, appRoleOptions, technicalRoleOptions } from '../modules/staff/staffModel.js'
+import { publishTrainingSheet } from '../modules/training/trainingSheetService.js'
+import { getUserErrorMessage } from '../core/appError.js'
+import { createDocumentViewerController } from '../shared/documentViewer/documentViewerController.js'
+import { COMMON_FORMATIONS, getCustomFormationLayout, getFormationLayout } from '../shared/pitch/formationLayouts.js'
+import { createPitchState, PITCH_POSITION_MODE } from '../shared/pitch/pitchState.js'
+import { createPitchController } from '../shared/pitch/pitchController.js'
+import { bindPitchTokenDragging } from '../shared/pitch/dragController.js'
+import { createMatchDraftService } from '../modules/match/matchService.js'
+import { createMatchLibraryService } from '../modules/match/matchLibraryService.js'
+import { getMatchOutcome } from '../modules/match/matchLibraryModel.js'
+import { normalizeScore } from '../modules/match/matchModel.js'
+import { createMatchReportRenderer } from '../modules/match/matchReportRenderer.js'
+import { createMatchReportService } from '../modules/match/matchReportService.js'
+import { printMatchReport } from '../modules/match/matchReportPrint.js'
+import { requirePublishedDocumentView } from '../shared/documentViewer/documentViewerPermissions.js'
+import {
+  ACCESS_CAPABILITIES,
+  can,
+  canAccessSection,
+  filterAccessibleMenu,
+  getFirstAccessibleSection,
+  setAccessRole,
+} from '../core/permissions.js'
+import {
+  applyAccessPolicy,
+  bindGlobalAccessGuard,
+  showAccessNotice,
+} from '../core/accessGuard.js'
 
 import {
   players,
@@ -11,7 +53,6 @@ import {
 
 let calendarEvents = []
 let currentUserRole = 'observer'
-let currentUserAppRole = 'read_only'
 let currentUser = null
 let currentUserProfile = null
 let staffProfiles = []
@@ -40,25 +81,10 @@ function teamLogoHtml(className = 'team-logo') {
   return `<span class="${className} ${className}--fallback">${escapeHtml(initials || 'T')}</span>`
 }
 
-const COMMON_FORMATIONS = Object.freeze([
-  '2-3-5','3-1-4-2','3-2-3-2','3-2-4-1','3-3-1-3','3-3-3-1','3-4-1-2',
-  '3-4-2-1','3-4-3','3-5-1-1','3-5-2','3-6-1','4-1-2-1-2','4-1-2-3',
-  '4-2-3-1','4-2-4','4-3-1-2','4-3-2-1','4-3-3','4-3-3 (falso 9)',
-  '4-3-3 mediano','4-3-3 offensivo','4-4-1-1','4-4-2','4-4-2 rombo',
-  '4-5-1','4-6-0','5-2-1-2','5-2-3','5-3-2','5-3-2 quinti','5-4-1',
-  '5-4-1 difensivo','WM 3-2-2-3','Personalizzato',
-])
-
 function formationOptionsHtml(selected = '') {
   return COMMON_FORMATIONS
     .map((value) => `<option value="${escapeHtml(value)}" ${selected === value ? 'selected' : ''}>${escapeHtml(value)}</option>`)
     .join('')
-}
-
-function normalizeScore(home, away) {
-  const left = String(home ?? '').trim()
-  const right = String(away ?? '').trim()
-  return left || right ? `${left || 0}-${right || 0}` : ''
 }
 
 function scoreFieldsHtml(prefix, label) {
@@ -71,14 +97,6 @@ function scoreFieldsHtml(prefix, label) {
     </div>
     <input type="hidden" name="${prefix}">
   </fieldset>`
-}
-
-function isOwner() {
-  return currentUserAppRole === 'owner' || currentUserAppRole === 'admin'
-}
-
-function isPortalOwner() {
-  return currentUserAppRole === 'owner'
 }
 
 function roleLabel(role) {
@@ -97,23 +115,6 @@ function roleLabel(role) {
   }
 
   return labels[role] ?? 'Staff'
-}
-
-function technicalRoleOptions(selected = 'observer') {
-  return [
-    ['coach','Allenatore'], ['assistant','Vice allenatore'],
-    ['athletic_coach','Preparatore fisico'], ['goalkeeper_coach','Preparatore portieri'],
-    ['analyst','Match analyst'], ['observer','Osservatore'], ['physio','Fisioterapista'],
-    ['collaborator','Collaboratore tecnico'], ['sporting_director','Direttore sportivo'],
-  ].map(([value, label]) => `<option value="${value}" ${selected === value || (selected === 'owner' && value === 'coach') ? 'selected' : ''}>${label}</option>`).join('')
-}
-
-function appRoleOptions(selected = 'collaborator', { includeOwner = false } = {}) {
-  const options = [
-    ...(includeOwner ? [['owner', 'Proprietario']] : []),
-    ['admin','Amministratore'], ['collaborator','Collaboratore'], ['read_only','Solo lettura'],
-  ]
-  return options.map(([value, label]) => `<option value="${value}" ${selected === value ? 'selected' : ''}>${label}</option>`).join('')
 }
 
 function profileFullName(profile, user = currentUser) {
@@ -138,7 +139,7 @@ function profileFullName(profile, user = currentUser) {
 async function loadCurrentUserRole(user) {
   if (!user?.id) {
     currentUserRole = 'observer'
-    currentUserAppRole = 'read_only'
+    setAccessRole('read_only')
     currentUserProfile = null
     return
   }
@@ -152,14 +153,14 @@ async function loadCurrentUserRole(user) {
   if (error) {
     console.error('Errore caricamento profilo:', error.message)
     currentUserRole = 'observer'
-    currentUserAppRole = 'read_only'
+    setAccessRole('read_only')
     currentUserProfile = null
     return
   }
 
   currentUserProfile = data ?? null
   currentUserRole = data?.role ?? 'observer'
-  currentUserAppRole = data?.app_role ?? (data?.role === 'owner' ? 'owner' : data?.role === 'read_only' ? 'read_only' : 'collaborator')
+  setAccessRole(data?.app_role ?? (data?.role === 'owner' ? 'owner' : data?.role === 'read_only' ? 'read_only' : 'collaborator'))
 
   if (data?.active === false) {
     await supabase.auth.signOut()
@@ -207,48 +208,12 @@ function playerKey(name = '') {
 }
 
 async function loadStaffProfiles() {
-  if (!isOwner()) {
+  try {
+    staffProfiles = await loadTeamStaffProfiles(getTeamProfile().id || null, currentUserProfile)
+  } catch (error) {
+    console.error('Errore caricamento staff:', error?.message || error)
     staffProfiles = []
-    return
   }
-
-  const teamId = getTeamProfile().id
-  if (!teamId) {
-    staffProfiles = currentUserProfile ? [currentUserProfile] : []
-    return
-  }
-
-  const { data: memberships, error: membershipError } = await supabase
-    .from('team_members')
-    .select('user_id')
-    .eq('team_id', teamId)
-
-  if (membershipError) {
-    console.error('Errore caricamento membri squadra:', membershipError.message)
-    staffProfiles = []
-    return
-  }
-
-  const userIds = [...new Set((memberships ?? []).map((item) => item.user_id).filter(Boolean))]
-  if (!userIds.length) {
-    staffProfiles = currentUserProfile ? [currentUserProfile] : []
-    return
-  }
-
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('id, first_name, last_name, email, role, app_role, active, updated_at')
-    .in('id', userIds)
-    .order('first_name', { ascending: true })
-    .order('last_name', { ascending: true })
-
-  if (error) {
-    console.error('Errore caricamento staff:', error.message)
-    staffProfiles = []
-    return
-  }
-
-  staffProfiles = data ?? []
 }
 
 function syncProfileHeader() {
@@ -265,13 +230,11 @@ function syncProfileHeader() {
 }
 
 async function loadCalendarEvents() {
-  const { data, error } = await supabase
-    .from('events')
-    .select('*')
-    .order('start_at')
-
-  if (error) {
-    alert(`Errore Supabase: ${error.message}`)
+  let data
+  try {
+    data = await listCalendarEvents()
+  } catch (error) {
+    alert(`Errore Supabase: ${error?.message || 'caricamento calendario non riuscito'}`)
     return
   }
 
@@ -327,6 +290,7 @@ const menu = [
   ['calendar', 'Calendario'],
   ['training-sheet', 'Training Sheet Editor'],
   ['library', 'Training Library'],
+  ['match-library', 'Match Library'],
   ['match-sheet', 'Match Sheet Editor'],
   ['board', 'Board'],
   ['squad', 'Rosa'],
@@ -335,8 +299,12 @@ const menu = [
   ['settings', 'Impostazioni'],
 ]
 
+function accessibleMenu() {
+  return filterAccessibleMenu(menu)
+}
+
 function menuHtml() {
-  return menu
+  return accessibleMenu()
     .map(
       ([key, label], index) => `
         <button
@@ -629,7 +597,7 @@ function calendarCells() {
     return `
       <div
         class="calendar-cell ${muted ? 'is-muted' : ''} ${isToday ? 'is-today' : ''}"
-        ${!muted && isOwner() ? `data-create-event-date="${dateValue}"` : ''}
+        ${!muted && can(ACCESS_CAPABILITIES.CALENDAR_CREATE) ? `data-create-event-date="${dateValue}"` : ''}
       >
         <span class="day-number ${isToday ? 'is-today' : ''}">
           ${day}
@@ -699,7 +667,7 @@ function calendarView() {
             data-calendar-today
           >Oggi</button>
 
-          ${isOwner()
+          ${can(ACCESS_CAPABILITIES.CALENDAR_CREATE)
             ? `
                 <button class="primary-action" type="button" data-new-event>
                   ${icon('plus')}
@@ -878,7 +846,7 @@ function analysisView() {
         </div>
         <div class="page-actions analysis-actions">
           <a class="ghost-button analysis-form-link" href="https://docs.google.com/forms/d/1dMx3J-lz8loospyKAx8Fdfi0oh0W1cGkUFZBMu6U_WU/edit" target="_blank" rel="noopener noreferrer">Apri Google Form</a>
-          ${isOwner() ? `<button class="primary-action" type="button" data-import-analysis>Importa CSV</button>` : ''}
+          ${can(ACCESS_CAPABILITIES.ANALYSIS_IMPORT) ? `<button class="primary-action" type="button" data-import-analysis>Importa CSV</button>` : ''}
           <input type="file" accept=".csv,text/csv" data-analysis-file hidden>
         </div>
       </div>
@@ -1044,7 +1012,7 @@ function trainingLibraryView() {
           <p>Archivio delle Training Sheet della stagione.</p>
         </div>
 
-        ${isOwner()
+        ${can(ACCESS_CAPABILITIES.TRAINING_SHEET_CREATE)
           ? `
               <button class="primary-action" type="button" data-new-event>
                 ${icon('plus')}
@@ -1191,10 +1159,10 @@ function getTrainingSheetRosterPlayers() {
 }
 
 function trainingSheetEditorView() {
-  if (!isOwner()) {
+  if (!can(ACCESS_CAPABILITIES.TRAINING_SHEET_EDIT)) {
     return `
       <section class="view page-view">
-        <div class="page-head"><div><h1>Training Sheet Editor</h1><p><span>ACCESSO RISERVATO</span><b>•</b>Solo amministratore</p></div></div>
+        <div class="page-head"><div><h1>Training Sheet Editor</h1><p><span>ACCESSO RISERVATO</span><b>•</b>Permesso di modifica necessario</p></div></div>
         <div class="placeholder-panel"><h2>Editor non disponibile</h2><p>Puoi consultare le Training Sheet pubblicate direttamente dal Calendario.</p></div>
       </section>
     `
@@ -1355,9 +1323,67 @@ function trainingSheetResultHtml(result) {
 }
 
 
+function matchLibraryView() {
+  const service = createMatchLibraryService({ storage: localStorage })
+  const season = getTeamProfile().season || ''
+  const matches = service.list(calendarEvents, season)
+  const competitionOptions = [...new Set(matches.map((match) => match.competition).filter(Boolean))]
+  const rows = matches.map((match) => {
+    const outcome = getMatchOutcome(match)
+    const dateLabel = match.date
+      ? new Intl.DateTimeFormat('it-IT', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(`${match.date}T12:00:00`))
+      : 'Data da definire'
+    const result = match.goalsFor == null || match.goalsAgainst == null ? '–' : `${match.goalsFor}–${match.goalsAgainst}`
+    const searchText = [match.opponent, match.competition, match.venue, match.season, match.date].join(' ').toLocaleLowerCase('it-IT')
+    return `<article class="match-library-card" data-match-library-card data-search-text="${escapeHtml(searchText)}" data-competition="${escapeHtml(match.competition)}" data-location="${match.homeAway}" data-outcome="${outcome}">
+      <div class="match-library-date"><strong>${escapeHtml(dateLabel)}</strong><span>${escapeHtml(match.time || '')}</span></div>
+      <div class="match-library-main">
+        <span class="match-library-kicker">${escapeHtml(match.competition)}${match.matchDay ? ` · Giornata ${match.matchDay}` : ''}</span>
+        <h3>${match.homeAway === 'home' ? escapeHtml(getTeamProfile().shortName || 'Noi') : escapeHtml(match.opponent)} <b>${result}</b> ${match.homeAway === 'away' ? escapeHtml(getTeamProfile().shortName || 'Noi') : escapeHtml(match.opponent)}</h3>
+        <p>${escapeHtml(match.venue || 'Impianto da definire')} · ${match.homeAway === 'home' ? 'Casa' : 'Trasferta'}</p>
+      </div>
+      <div class="match-library-status"><span>${escapeHtml(match.documentStatus)}</span><small>${match.source === 'calendar' ? 'Calendario' : 'Archivio'}</small></div>
+      <div class="match-library-actions">
+        <button type="button" class="button button--primary" data-open-match-sheet="${escapeHtml(match.id)}" data-match-opponent="${escapeHtml(match.opponent)}" data-match-date="${escapeHtml(match.date)}">Apri Match Sheet</button>
+        ${match.source === 'library' ? `<button type="button" class="icon-button" data-delete-library-match="${escapeHtml(match.id)}" aria-label="Elimina gara">×</button>` : ''}
+      </div>
+    </article>`
+  }).join('')
+
+  return `<section class="content-section match-library" data-match-library>
+    <header class="page-heading match-library-heading">
+      <div><span class="eyebrow">A.12 · Archivio gare</span><h1>Match Library</h1><p>Tutte le partite della stagione, ordinate e collegate al Match Sheet.</p></div>
+      <button type="button" class="button button--primary" data-toggle-match-create>+ Nuova gara</button>
+    </header>
+
+    <form class="match-library-create" data-match-create-form hidden>
+      <div class="match-library-form-grid">
+        <label><span>Data</span><input type="date" name="date" required></label>
+        <label><span>Ora</span><input type="time" name="time"></label>
+        <label><span>Avversario</span><input type="text" name="opponent" required placeholder="Nome squadra"></label>
+        <label><span>Competizione</span><select name="competition"><option>Campionato</option><option>Coppa</option><option>Amichevole</option></select></label>
+        <label><span>Casa / trasferta</span><select name="homeAway"><option value="home">Casa</option><option value="away">Trasferta</option></select></label>
+        <label><span>Impianto</span><input type="text" name="venue" placeholder="Campo o stadio"></label>
+      </div>
+      <div class="match-library-form-actions"><button type="submit" class="button button--primary">Salva gara</button><button type="button" class="button" data-cancel-match-create>Annulla</button><span data-match-create-message></span></div>
+    </form>
+
+    <div class="match-library-toolbar">
+      <label class="match-library-search"><span class="nav-icon">${icon('search')}</span><input type="search" placeholder="Cerca avversario, competizione o impianto" data-match-library-search></label>
+      <select data-match-library-competition><option value="">Tutte le competizioni</option>${competitionOptions.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join('')}</select>
+      <select data-match-library-location><option value="">Casa e trasferta</option><option value="home">Casa</option><option value="away">Trasferta</option></select>
+      <select data-match-library-outcome><option value="">Tutti i risultati</option><option value="win">Vittorie</option><option value="draw">Pareggi</option><option value="loss">Sconfitte</option><option value="pending">Da giocare</option></select>
+    </div>
+
+    <div class="match-library-summary"><strong>${matches.length}</strong><span>gare archiviate</span></div>
+    <div class="match-library-list" data-match-library-list>${rows || '<div class="empty-state">Nessuna gara presente. Crea la prima gara o aggiungila dal Calendario.</div>'}</div>
+    <div class="empty-state" data-match-library-empty hidden>Nessuna gara corrisponde ai filtri selezionati.</div>
+  </section>`
+}
+
 function matchSheetEditorView() {
-  if (!isOwner()) {
-    return `<section class="placeholder"><h1>Match Sheet Editor</h1><p>Accesso riservato all’amministratore.</p></section>`
+  if (!can(ACCESS_CAPABILITIES.MATCH_SHEET_EDIT)) {
+    return `<section class="placeholder"><h1>Match Sheet Editor</h1><p>Il tuo livello di accesso non consente di modificare le Match Sheet.</p></section>`
   }
 
   const formations = COMMON_FORMATIONS
@@ -1468,7 +1494,7 @@ function boardView() {
 }
 
 function teamSettingsView() {
-  if (!isOwner()) return `<section class="placeholder"><h1>Identità squadra</h1><p>Accesso riservato all’amministratore.</p></section>`
+  if (!can(ACCESS_CAPABILITIES.TEAM_IDENTITY_UPDATE)) return `<section class="placeholder"><h1>Identità squadra</h1><p>Accesso riservato all’amministratore.</p></section>`
   const team = getTeamProfile()
   return `<section class="view page-view team-settings-view">
     <div class="page-head"><div><h1>Identità squadra</h1><p><span>CONFIGURAZIONE PORTALE</span><b>•</b>Brand, colori e maglia</p></div></div>
@@ -1599,14 +1625,14 @@ function settingsView() {
         <div><h1>Impostazioni</h1><p><span>PORTALE</span><b>•</b>Configurazione e accessi</p></div>
       </div>
       <div class="settings-grid">
-        ${isOwner() ? `
+        ${can(ACCESS_CAPABILITIES.STAFF_MANAGE) ? `
           <button class="settings-card" type="button" data-open-staff>
             <span class="settings-card-icon">${icon('squad')}</span>
             <span><strong>Gestione Staff</strong><small>Crea, modifica ruoli e gestisci gli accessi.</small></span>
             <b>→</b>
           </button>
         ` : ''}
-        ${isOwner() ? `<button class="settings-card" type="button" data-open-team-settings>
+        ${can(ACCESS_CAPABILITIES.TEAM_IDENTITY_UPDATE) ? `<button class="settings-card" type="button" data-open-team-settings>
           <span class="settings-card-icon">${icon('settings')}</span>
           <span><strong>Identità squadra</strong><small>Nome, logo, colori e stile maglia.</small></span>
           <b>→</b>
@@ -1622,7 +1648,7 @@ function settingsView() {
 }
 
 function staffManagementView() {
-  if (!isOwner()) {
+  if (!can(ACCESS_CAPABILITIES.STAFF_MANAGE)) {
     return `
       <section class="view page-view">
         <div class="page-head"><div><h1>Impostazioni</h1></div></div>
@@ -1651,7 +1677,7 @@ function staffManagementView() {
         </div>
         <div class="staff-member-actions">
           <span class="staff-member-name">${escapeHtml(name || 'Nome da completare')}</span>
-          <span class="staff-access-badge staff-access-badge--${level}">${level === 'owner' ? 'Proprietario' : level === 'admin' ? 'Amministratore' : level === 'read_only' ? 'Solo lettura' : 'Collaboratore'}</span>
+          <span class="staff-access-badge staff-access-badge--${level}">${accessLevelLabel(level)}</span>
           <p class="form-message" data-staff-message></p>
           <div class="staff-member-action-row">
             ${canDelete ? '<button class="danger-button" type="button" data-delete-staff-user>Elimina utente</button>' : ''}
@@ -1853,32 +1879,35 @@ function drawerHtml(event) {
                 ${trainingSheetPreviewHtml(event)}
               </div>
 
-              ${isOwner() ? `
+              ${event.trainingSheetUrl && can(ACCESS_CAPABILITIES.TRAINING_SHEET_VIEW_PUBLISHED) ? `
+                <div class="drawer-ts-view-actions">
+                  <button class="wide-button drawer-sheet-link" type="button" data-view-training-sheet="${event.id}"><span class="drawer-sheet-link__icon">${icon('sheet')}</span><span>Visualizza Training Sheet</span></button>
+                </div>` : ''}
+              ${can(ACCESS_CAPABILITIES.TRAINING_SHEET_EDIT) ? `
                 <div class="drawer-ts-owner-actions">
                   ${event.editorData ? `<button class="wide-button" type="button" data-edit-training-sheet="${event.id}">${icon('sheet')} Modifica nel TS Editor</button>` : ''}
-                  ${event.trainingSheetUrl ? `<a class="wide-button drawer-sheet-link" href="${event.trainingSheetUrl}" target="_blank" rel="noopener noreferrer"><span class="drawer-sheet-link__icon">${icon('sheet')}</span><span>Apri PDF</span></a>` : ''}
                 </div>` : ''}
             </div>
           `
         : ''}
 
-      ${isOwner()
+      ${can(ACCESS_CAPABILITIES.CALENDAR_UPDATE) || can(ACCESS_CAPABILITIES.CALENDAR_DELETE)
         ? `
             <div class="drawer-actions">
-              <button
+              ${can(ACCESS_CAPABILITIES.CALENDAR_UPDATE) ? `<button
                 type="button"
                 data-edit-event="${event.id}"
               >
                 Modifica evento
-              </button>
+              </button>` : ''}
 
-              <button
+              ${can(ACCESS_CAPABILITIES.CALENDAR_DELETE) ? `<button
                 class="drawer-delete-button"
                 type="button"
                 data-delete-event="${event.id}"
               >
                 Elimina evento
-              </button>
+              </button>` : ''}
             </div>
           `
         : ''}
@@ -2224,6 +2253,7 @@ function profileMenuHtml(userInitial, userEmail, userName, roleLabel) {
         class="profile-dropdown"
         role="menu"
         aria-hidden="true"
+        inert
       >
         <div class="profile-dropdown-head">
           <span class="profile-dropdown-avatar" aria-hidden="true">
@@ -2273,7 +2303,10 @@ function profileMenuHtml(userInitial, userEmail, userName, roleLabel) {
 
 export async function prepareAppData(user) {
   currentUser = user
-  await loadTeamProfile(user)
+  await Promise.all([
+    loadTeamProfile(user),
+    loadCurrentUserRole(user),
+  ])
 }
 
 export function renderApp(user) {
@@ -2337,6 +2370,7 @@ export function renderApp(user) {
 
       <div id="drawerRoot"></div>
       <div id="modalRoot"></div>
+      <div id="documentViewerRoot"></div>
     </div>
   `
 }
@@ -2379,12 +2413,15 @@ export async function attachAppEvents(user) {
   await loadTeamProfile(user)
   await loadCurrentUserRole(user)
   syncProfileHeader()
+  applyAccessPolicy(document)
   await loadCalendarEvents()
   await loadPlayerProfiles()
   
   const root = document.querySelector('#viewRoot')
   const drawerRoot = document.querySelector('#drawerRoot')
   const modalRoot = document.querySelector('#modalRoot')
+  const documentViewerRoot = document.querySelector('#documentViewerRoot')
+  const documentViewer = createDocumentViewerController(documentViewerRoot)
 
   const logoutButton =
     document.querySelector('#logoutButton')
@@ -2407,12 +2444,19 @@ export async function attachAppEvents(user) {
   }
 
  async function setView(key, label) {
+  if (!canAccessSection(key)) {
+    showAccessNotice('Sezione non disponibile per il tuo livello di accesso.')
+    key = getFirstAccessibleSection(menu)
+    label = menu.find(([sectionKey]) => sectionKey === key)?.[1] || 'Dashboard'
+    setActiveNavigation(key)
+    localStorage.setItem('nz-active-section', key)
+  }
   closeDrawer()
   closeNewEventModal()
   document.body.classList.remove('drawer-open', 'new-event-modal-open')
   document.body.style.removeProperty('overflow')
 
-  if (key === 'calendar' || key === 'dashboard' || key === 'library' || key === 'training-sheet' || key === 'match-sheet') {
+  if (key === 'calendar' || key === 'dashboard' || key === 'library' || key === 'training-sheet' || key === 'match-library' || key === 'match-sheet') {
     await loadCalendarEvents()
   }
 
@@ -2432,6 +2476,7 @@ export async function attachAppEvents(user) {
     dashboard: dashboardView,
     calendar: calendarView,
     'training-sheet': trainingSheetEditorView,
+    'match-library': matchLibraryView,
     'match-sheet': matchSheetEditorView,
     board: boardView,
     library: trainingLibraryView,
@@ -2448,6 +2493,7 @@ export async function attachAppEvents(user) {
     : placeholderView(label)
 
   await bindDynamic()
+  applyAccessPolicy(root)
 
   document.documentElement.scrollTop = 0
   document.body.scrollTop = 0
@@ -2537,7 +2583,7 @@ export async function attachAppEvents(user) {
   }
 
   function openNewEventModal(selectedDate) {
-    if (!isOwner()) return
+    if (!can(ACCESS_CAPABILITIES.CALENDAR_CREATE)) { showAccessNotice(); return }
     if (!modalRoot) {
       return
     }
@@ -2646,9 +2692,9 @@ export async function attachAppEvents(user) {
         `${date}T${time}:00`,
       ).toISOString()
 
-      const { error: insertError } = await supabase
-        .from('events')
-        .insert({
+      let insertError = null
+      try {
+        await createCalendarEvent({
           title: eventTitle,
           event_type: eventType,
           start_at: startAt,
@@ -2659,6 +2705,9 @@ export async function attachAppEvents(user) {
           training_sheet_path: filePath,
           notes: eventType === 'rest' ? JSON.stringify({ type: 'rest_event', rest_note: restNote }) : null,
         })
+      } catch (error) {
+        insertError = error
+      }
 
       if (insertError) {
         if (filePath) {
@@ -2711,7 +2760,7 @@ export async function attachAppEvents(user) {
   }
 
   function openEditEventModal(eventId) {
-    if (!isOwner()) return
+    if (!can(ACCESS_CAPABILITIES.CALENDAR_UPDATE)) { showAccessNotice(); return }
     const currentEvent = calendarEvents.find(
       (item) => String(item.id) === String(eventId),
     )
@@ -2817,9 +2866,9 @@ export async function attachAppEvents(user) {
         `${date}T${time}:00`,
       ).toISOString()
 
-      const { error: updateError } = await supabase
-        .from('events')
-        .update({
+      let updateError = null
+      try {
+        await updateCalendarEvent(currentEvent.id, {
           title: eventTitle,
           event_type: eventType,
           start_at: startAt,
@@ -2832,7 +2881,9 @@ export async function attachAppEvents(user) {
             ? JSON.stringify({ type: 'rest_event', rest_note: restNote })
             : (isTrainingEventType(eventType) ? currentEvent.rawNotes : null),
         })
-        .eq('id', currentEvent.id)
+      } catch (error) {
+        updateError = error
+      }
 
       if (updateError) {
         if (
@@ -2868,7 +2919,7 @@ export async function attachAppEvents(user) {
   }
 
   async function deleteEvent(eventId) {
-    if (!isOwner()) return
+    if (!can(ACCESS_CAPABILITIES.CALENDAR_DELETE)) { showAccessNotice(); return }
     const currentEvent = calendarEvents.find(
       (item) => String(item.id) === String(eventId),
     )
@@ -2887,13 +2938,10 @@ export async function attachAppEvents(user) {
       return
     }
 
-    const { error: deleteError } = await supabase
-      .from('events')
-      .delete()
-      .eq('id', currentEvent.id)
-
-    if (deleteError) {
-      alert(`Errore eliminazione: ${deleteError.message}`)
+    try {
+      await deleteCalendarEvent(currentEvent.id)
+    } catch (deleteError) {
+      alert(`Errore eliminazione: ${deleteError?.message || 'operazione non riuscita'}`)
       return
     }
 
@@ -2942,6 +2990,22 @@ export async function attachAppEvents(user) {
       })
 
     drawerRoot
+      .querySelector('[data-view-training-sheet]')
+      ?.addEventListener('click', () => {
+        try {
+          requirePublishedDocumentView()
+          documentViewer.open({
+            title: trainingSheetName(event),
+            url: event.trainingSheetUrl,
+            downloadUrl: event.trainingSheetUrl,
+            mimeType: String(event.trainingSheetPath || '').toLowerCase().endsWith('.pdf') ? 'application/pdf' : '',
+          })
+        } catch (error) {
+          showAccessNotice(error?.message)
+        }
+      })
+
+    drawerRoot
       .querySelector('[data-edit-training-sheet]')
       ?.addEventListener('click', async () => {
         if (!event.editorData) return
@@ -2969,6 +3033,7 @@ export async function attachAppEvents(user) {
       'true',
     )
 
+    profileDropdown.inert = false
     profileDropdown.setAttribute(
       'aria-hidden',
       'false',
@@ -2988,6 +3053,11 @@ export async function attachAppEvents(user) {
       'false',
     )
 
+    if (profileDropdown.contains(document.activeElement)) {
+      profileMenuButton.focus({ preventScroll: true })
+    }
+
+    profileDropdown.inert = true
     profileDropdown.setAttribute(
       'aria-hidden',
       'true',
@@ -3010,6 +3080,58 @@ export async function attachAppEvents(user) {
   }
 
   async function bindDynamic() {
+    const matchLibrary = root.querySelector('[data-match-library]')
+    if (matchLibrary) {
+      const service = createMatchLibraryService({ storage: localStorage })
+      const createForm = matchLibrary.querySelector('[data-match-create-form]')
+      const toggleCreate = (show) => {
+        createForm.hidden = !show
+        if (show) createForm.elements.date.value ||= formatDateInputValue(new Date())
+      }
+      matchLibrary.querySelector('[data-toggle-match-create]')?.addEventListener('click', () => toggleCreate(createForm.hidden))
+      matchLibrary.querySelector('[data-cancel-match-create]')?.addEventListener('click', () => toggleCreate(false))
+      createForm?.addEventListener('submit', async (event) => {
+        event.preventDefault()
+        const data = Object.fromEntries(new FormData(createForm).entries())
+        service.create({ ...data, season: getTeamProfile().season || '' })
+        await setView('match-library', 'Match Library')
+      })
+      const applyMatchFilters = () => {
+        const query = matchLibrary.querySelector('[data-match-library-search]')?.value.trim().toLocaleLowerCase('it-IT') || ''
+        const competition = matchLibrary.querySelector('[data-match-library-competition]')?.value || ''
+        const location = matchLibrary.querySelector('[data-match-library-location]')?.value || ''
+        const outcome = matchLibrary.querySelector('[data-match-library-outcome]')?.value || ''
+        let visible = 0
+        matchLibrary.querySelectorAll('[data-match-library-card]').forEach((card) => {
+          const show = (!query || card.dataset.searchText.includes(query))
+            && (!competition || card.dataset.competition === competition)
+            && (!location || card.dataset.location === location)
+            && (!outcome || card.dataset.outcome === outcome)
+          card.hidden = !show
+          if (show) visible += 1
+        })
+        const empty = matchLibrary.querySelector('[data-match-library-empty]')
+        if (empty) empty.hidden = visible > 0
+      }
+      matchLibrary.querySelectorAll('[data-match-library-search], [data-match-library-competition], [data-match-library-location], [data-match-library-outcome]').forEach((control) => {
+        control.addEventListener(control.matches('input') ? 'input' : 'change', applyMatchFilters)
+      })
+      matchLibrary.addEventListener('click', async (event) => {
+        const openButton = event.target.closest('[data-open-match-sheet]')
+        if (openButton) {
+          localStorage.setItem('staff-active-match', JSON.stringify({ id: openButton.dataset.openMatchSheet, opponent: openButton.dataset.matchOpponent, date: openButton.dataset.matchDate }))
+          setActiveNavigation('match-sheet')
+          localStorage.setItem('nz-active-section', 'match-sheet')
+          await setView('match-sheet', 'Match Sheet Editor')
+          return
+        }
+        const deleteButton = event.target.closest('[data-delete-library-match]')
+        if (deleteButton && window.confirm('Eliminare questa gara dalla Match Library?')) {
+          service.remove(deleteButton.dataset.deleteLibraryMatch)
+          await setView('match-library', 'Match Library')
+        }
+      })
+    }
     root.querySelector('[data-open-team-settings]')?.addEventListener('click', () => setView('team-settings', 'Identità squadra'))
 
     const teamSettingsForm = root.querySelector('[data-team-settings-form]')
@@ -3163,67 +3285,81 @@ export async function attachAppEvents(user) {
     if (board) {
       const pitch = board.querySelector('[data-board-pitch]')
       const saved = readLocalJson('nz-board-v1', {})
-      const formationLayoutsLocal = {
-        '4-4-2': [[50,90],[18,72],[38,76],[62,76],[82,72],[18,48],[38,52],[62,52],[82,48],[38,24],[62,24]],
-        '4-3-3': [[50,90],[18,72],[38,76],[62,76],[82,72],[28,50],[50,56],[72,50],[18,24],[50,18],[82,24]],
-        '3-5-2': [[50,90],[25,74],[50,78],[75,74],[12,48],[32,52],[50,58],[68,52],[88,48],[38,22],[62,22]],
-      }
-      const defaultLayout = formationLayoutsLocal['4-4-2']
-      const setBoardToken = (side,index,x,y) => {
-        const token = board.querySelector(`[data-board-token="${side}-${index}"]`)
-        if (!token) return
-        const nx = Math.max(4,Math.min(96,Number(x)))
-        const ny = Math.max(4,Math.min(96,Number(y)))
-        token.style.setProperty('--x',nx)
-        token.style.setProperty('--y',ny)
-        board.querySelector(`[name="${side}_x_${index}"]`).value = nx
-        board.querySelector(`[name="${side}_y_${index}"]`).value = ny
-      }
-      const applyBoardFormation = (side,formation) => {
-        const layout = formationLayoutsLocal[formation] || defaultLayout
-        layout.forEach((point,index) => {
-          const y = side === 'away' ? 100 - point[1] : point[1]
-          setBoardToken(side,index,point[0],y)
-        })
-      }
       const saveBoard = () => {
         const data = {}
         board.querySelectorAll('input[name], select[name]').forEach((field) => { data[field.name] = field.value })
-        localStorage.setItem('nz-board-v1',JSON.stringify(data))
+        localStorage.setItem('nz-board-v1', JSON.stringify(data))
       }
-      board.querySelectorAll('select').forEach((select) => select.addEventListener('change', () => {
-        const side = select.name.includes('home') ? 'home' : 'away'
-        applyBoardFormation(side,select.value); saveBoard()
-      }))
-      board.querySelectorAll('input[type="color"]').forEach((input) => input.addEventListener('input', () => {
-        const side=input.name.includes('home')?'home':'away'
-        board.style.setProperty(`--board-${side}`,input.value); saveBoard()
-      }))
-      board.querySelectorAll('[data-board-token]').forEach((token) => {
-        let dragging=false
-        const [side,indexText]=token.dataset.boardToken.split('-')
-        const index=Number(indexText)
-        const move=(event)=>{
-          if(!dragging)return
-          const rect=pitch.getBoundingClientRect()
-          setBoardToken(side,index,((event.clientX-rect.left)/rect.width)*100,((event.clientY-rect.top)/rect.height)*100)
-        }
-        token.addEventListener('pointerdown',(event)=>{dragging=true;token.setPointerCapture?.(event.pointerId);event.preventDefault()})
-        token.addEventListener('pointermove',move)
-        token.addEventListener('pointerup',(event)=>{move(event);dragging=false;token.releasePointerCapture?.(event.pointerId);saveBoard()})
-        token.addEventListener('pointercancel',()=>{dragging=false})
-      })
-      board.querySelector('[data-board-reset]')?.addEventListener('click',()=>{applyBoardFormation('home',board.querySelector('[name="board_home_formation"]').value);applyBoardFormation('away',board.querySelector('[name="board_away_formation"]').value);saveBoard()})
+      const createSideController = (side, defaultFormation, mirrored) => {
+        const formationField = board.querySelector(`[name="board_${side}_formation"]`)
+        const savedPositions = Array.from({ length: 11 }, (_, index) => {
+          const x = Number(saved[`${side}_x_${index}`])
+          const y = Number(saved[`${side}_y_${index}`])
+          return Number.isFinite(x) && Number.isFinite(y) ? [x, y] : null
+        })
+        const hasSavedPositions = savedPositions.every(Boolean)
+        const state = createPitchState({
+          formation: saved[`board_${side}_formation`] || defaultFormation,
+          positions: hasSavedPositions ? savedPositions : null,
+          mode: hasSavedPositions ? PITCH_POSITION_MODE.CUSTOM : PITCH_POSITION_MODE.AUTOMATIC,
+          mirrored,
+        })
+        return createPitchController({
+          state,
+          render(snapshot) {
+            formationField.value = snapshot.formation
+            snapshot.positions.forEach(([x, y], index) => {
+              const token = board.querySelector(`[data-board-token="${side}-${index}"]`)
+              if (!token) return
+              token.style.setProperty('--x', x.toFixed(2))
+              token.style.setProperty('--y', y.toFixed(2))
+              board.querySelector(`[name="${side}_x_${index}"]`).value = x.toFixed(2)
+              board.querySelector(`[name="${side}_y_${index}"]`).value = y.toFixed(2)
+            })
+            board.dataset[`${side}PositionMode`] = snapshot.mode
+          },
+          persist: saveBoard,
+        })
+      }
       if (Object.keys(saved).length) {
-        Object.entries(saved).forEach(([key,value])=>{const field=board.querySelector(`[name="${CSS.escape(key)}"]`);if(field)field.value=value})
-        board.style.setProperty('--board-home', saved.board_home_color || getTeamProfile().primaryColor)
-        board.style.setProperty('--board-away', saved.board_away_color || '#9f1239')
-        for (const side of ['home','away']) for(let i=0;i<11;i++) setBoardToken(side,i,saved[`${side}_x_${i}`]??50,saved[`${side}_y_${i}`]??50)
-      } else {
-        board.style.setProperty('--board-home', getTeamProfile().primaryColor)
-        board.style.setProperty('--board-away', '#9f1239')
-        applyBoardFormation('home','4-3-3'); applyBoardFormation('away','4-4-2')
+        Object.entries(saved).forEach(([key, value]) => {
+          const field = board.querySelector(`[name="${CSS.escape(key)}"]`)
+          if (field) field.value = value
+        })
       }
+      board.style.setProperty('--board-home', saved.board_home_color || getTeamProfile().primaryColor)
+      board.style.setProperty('--board-away', saved.board_away_color || '#9f1239')
+      const controllers = {
+        home: createSideController('home', '4-3-3', false),
+        away: createSideController('away', '4-4-2', true),
+      }
+      controllers.home.initialize()
+      controllers.away.initialize()
+      for (const side of ['home', 'away']) {
+        board.querySelector(`[name="board_${side}_formation"]`)?.addEventListener('change', (event) => {
+          controllers[side].applyFormation(event.currentTarget.value)
+        })
+      }
+      board.querySelectorAll('input[type="color"]').forEach((input) => input.addEventListener('input', () => {
+        const side = input.name.includes('home') ? 'home' : 'away'
+        board.style.setProperty(`--board-${side}`, input.value)
+        saveBoard()
+      }))
+      bindPitchTokenDragging({
+        pitch,
+        tokens: [...board.querySelectorAll('[data-board-token]')],
+        getIndex: (token) => Number(token.dataset.boardToken.split('-')[1]),
+        onMove: (index, x, y, token) => {
+          const side = token.dataset.boardToken.startsWith('away-') ? 'away' : 'home'
+          controllers[side].moveToken(index, x, y, false)
+        },
+        onCommit: () => saveBoard(),
+      })
+      board.querySelector('[data-board-reset]')?.addEventListener('click', () => {
+        controllers.home.applyFormation(board.querySelector('[name="board_home_formation"]').value, false)
+        controllers.away.applyFormation(board.querySelector('[name="board_away_formation"]').value, false)
+        saveBoard()
+      })
     }
 
     const matchEditor = root.querySelector('[data-match-editor]')
@@ -3236,7 +3372,7 @@ export async function attachAppEvents(user) {
       const pdf = matchEditor.querySelector('[data-match-pdf]')
       const progress = matchEditor.querySelector('[data-match-progress]')
       const state = matchEditor.querySelector('[data-match-save-state]')
-      const storageKey = 'nz-match-sheet-editor-v1'
+      const draftService = createMatchDraftService({ storage: localStorage })
       const matchRosterOptions = getTrainingSheetRosterPlayers()
         .map((player) => `<option value="${escapeHtml(player.canonicalName)}">${escapeHtml(player.surname)} ${escapeHtml(player.firstName)}</option>`)
         .join('')
@@ -3255,15 +3391,16 @@ export async function attachAppEvents(user) {
         renderReport()
         window.scrollTo({top:0, behavior:'smooth'})
       }
-      const collect = () => {
-        if (form.elements.result) form.elements.result.value = normalizeScore(form.elements.result_home?.value, form.elements.result_away?.value)
-        if (form.elements.half_result) form.elements.half_result.value = normalizeScore(form.elements.half_result_home?.value, form.elements.half_result_away?.value)
-        const data = Object.fromEntries(new FormData(form).entries())
-        form.querySelectorAll('input[type="checkbox"]').forEach((input) => { data[input.name] = input.checked })
-        return data
+      const collect = () => draftService.collect(form)
+      const save = () => {
+        draftService.save(form)
+        if (state) state.textContent = 'Bozza salvata'
       }
-      const save = () => { localStorage.setItem(storageKey, JSON.stringify(collect())); if(state) state.textContent='Bozza salvata' }
-      const scheduleSave = () => { if(state) state.textContent='Salvataggio…'; clearTimeout(saveTimer); saveTimer=setTimeout(save,350) }
+      const scheduleSave = () => {
+        if (state) state.textContent = 'Salvataggio…'
+        clearTimeout(saveTimer)
+        saveTimer = setTimeout(save, 350)
+      }
       const renderNotes = () => {
         const rootNotes = matchEditor.querySelector('[data-note-fields]')
         const mode = form.elements.notes_mode.value
@@ -3360,19 +3497,7 @@ export async function attachAppEvents(user) {
           })
         }
       }
-      const formationLayouts = {
-        '4-4-2': [[50,90],[15,72],[38,72],[62,72],[85,72],[15,48],[38,48],[62,48],[85,48],[38,22],[62,22]],
-        '4-3-3': [[50,90],[15,72],[38,72],[62,72],[85,72],[25,50],[50,50],[75,50],[15,22],[50,18],[85,22]],
-        '4-2-3-1': [[50,90],[15,72],[38,72],[62,72],[85,72],[35,56],[65,56],[18,36],[50,34],[82,36],[50,16]],
-        '4-3-1-2': [[50,90],[15,72],[38,72],[62,72],[85,72],[24,52],[50,55],[76,52],[50,34],[36,17],[64,17]],
-        '4-1-4-1': [[50,90],[15,72],[38,72],[62,72],[85,72],[50,58],[15,40],[38,40],[62,40],[85,40],[50,17]],
-        '3-5-2': [[50,90],[24,70],[50,73],[76,70],[12,48],[32,50],[50,56],[68,50],[88,48],[36,18],[64,18]],
-        '3-4-1-2': [[50,90],[24,70],[50,73],[76,70],[15,48],[38,51],[62,51],[85,48],[50,33],[36,16],[64,16]],
-        '3-4-2-1': [[50,90],[24,70],[50,73],[76,70],[15,49],[38,52],[62,52],[85,49],[32,31],[68,31],[50,14]],
-        '3-4-3': [[50,90],[24,70],[50,73],[76,70],[15,48],[38,52],[62,52],[85,48],[16,20],[50,15],[84,20]],
-        '5-3-2': [[50,90],[10,68],[30,72],[50,74],[70,72],[90,68],[25,49],[50,53],[75,49],[36,18],[64,18]],
-        '5-4-1': [[50,90],[10,68],[30,72],[50,74],[70,72],[90,68],[15,44],[38,48],[62,48],[85,44],[50,16]]
-      }
+
       const setOpponentTokenPosition = (index, x, y, persist = true) => {
         const token = matchEditor.querySelector(`[data-opponent-token="${index}"]`)
         if (!token) return
@@ -3387,7 +3512,7 @@ export async function attachAppEvents(user) {
         if (persist) scheduleSave()
       }
       const updateOpponentPitch = (formation = '4-4-2', persist = true) => {
-        const layout = formationLayouts[formation] || formationLayouts['4-4-2']
+        const layout = getFormationLayout(formation)
         layout.forEach(([x,y], index) => setOpponentTokenPosition(index, x, y, false))
         if (persist) scheduleSave()
       }
@@ -3430,22 +3555,12 @@ export async function attachAppEvents(user) {
         if (yInput) yInput.value = safeY.toFixed(2)
         if (persist) scheduleSave()
       }
-      const positionsFromCustomFormation = (value) => {
-        const lines = String(value || '').trim().split('-').map(Number)
-        if (!lines.length || lines.some((n) => !Number.isInteger(n) || n < 1 || n > 5) || lines.reduce((a,b)=>a+b,0) !== 10) return null
-        const result = [[50,90]]
-        const yTop = 18
-        const yBottom = 70
-        lines.forEach((count, layerIndex) => {
-          const y = lines.length === 1 ? 45 : yBottom - ((yBottom-yTop) * layerIndex / (lines.length-1))
-          for (let i=0;i<count;i++) result.push([100*(i+1)/(count+1), y])
-        })
-        return result
-      }
+      const positionsFromCustomFormation = getCustomFormationLayout
+
       const applyFormation = (formation, persist = true) => {
         const layout = formation === 'Personalizzato'
           ? positionsFromCustomFormation(form.elements.custom_formation?.value)
-          : formationLayouts[formation]
+          : getFormationLayout(formation)
         if (!layout || layout.length !== 11) return false
         layout.forEach(([x,y], index) => setTokenPosition(index, x, y, false))
         if (persist) scheduleSave()
@@ -3512,69 +3627,14 @@ export async function attachAppEvents(user) {
           })
         })
       }
-      const renderReport = () => {
-        const d = collect()
-        const preview = matchEditor.querySelector('[data-match-report-preview]')
-        const formationName = d.custom_formation || d.formation || '—'
-        const starters = Array.from({ length: 11 }, (_, i) => ({
-          number: d[`starter_number_${i}`] || '',
-          name: d[`starter_${i}`] || 'Da definire',
-          x: Number(d[`position_x_${i}`] || 50),
-          y: Number(d[`position_y_${i}`] || 50),
-        }))
-        const bench = Array.from({ length: 9 }, (_, i) => ({ number: d[`bench_number_${i}`] || '', name: d[`bench_${i}`] || '' })).filter((item) => item.name)
-        const rowIndex = (row, prefix) => Number(row.querySelector(`[name^="${prefix}"]`)?.name.match(/\d+/)?.[0])
-        const substitutions = [...matchEditor.querySelectorAll('[data-match-row="substitution"]')].map((row) => {
-          const i = rowIndex(row, 'sub_minute_')
-          return { minute: d[`sub_minute_${i}`], out: d[`sub_out_${i}`], in: d[`sub_in_${i}`], reason: d[`sub_reason_${i}`] }
-        }).filter((item) => item.minute || item.out || item.in)
-        const goals = [...matchEditor.querySelectorAll('[data-match-row="goal"]')].map((row) => {
-          const i = rowIndex(row, 'goal_minute_')
-          return { minute: d[`goal_minute_${i}`], scorer: d[`scorer_${i}`], assist: d[`assist_${i}`] }
-        }).filter((item) => item.minute || item.scorer)
-        const cards = [...matchEditor.querySelectorAll('[data-match-row="card"]')].map((row) => {
-          const i = rowIndex(row, 'card_minute_')
-          return { minute: d[`card_minute_${i}`], player: d[`card_player_${i}`], type: d[`card_type_${i}`] }
-        }).filter((item) => item.minute || item.player)
-        const opponentSystems = Object.keys(d)
-          .filter((key) => /^opponent_system_\d+$/.test(key))
-          .sort((a, b) => Number(a.match(/\d+/)[0]) - Number(b.match(/\d+/)[0]))
-          .map((key) => {
-            const index = key.match(/\d+/)[0]
-            return { system: d[key], minute: d[`opponent_system_minute_${index}`], note: d[`opponent_system_note_${index}`] }
-          })
-          .filter((item) => item.system)
-        const ownNotes = Object.keys(d).filter((key) => /^own_note_\d+$/.test(key) && d[key]).sort().map((key) => d[key])
-        const possessionLabels = ['Costruzione da rimessa','Costruzione media','Sviluppo e rifinitura','Finalizzazione','Transizione positiva']
-        const nonPossessionLabels = ['Prima pressione','Blocco medio','Blocco basso','Transizione negativa']
-        const possessionNotes = possessionLabels.map((label,i)=>({label,note:d[`opponent_possession_note_${i}`]})).filter((item)=>item.note)
-        const nonPossessionNotes = nonPossessionLabels.map((label,i)=>({label,note:d[`opponent_nonpossession_note_${i}`]})).filter((item)=>item.note)
-        const setPieces = [
-          d.opponent_corners ? {label:'Calci d’angolo',note:d.opponent_corners} : null,
-          d.opponent_wide_free_kicks ? {label:'Punizioni laterali',note:d.opponent_wide_free_kicks} : null,
-        ].filter(Boolean)
-        const penaltySummary = d.opponent_penalty_taken ? [d.opponent_penalty_result,d.opponent_penalty_direction,d.opponent_penalty_note].filter(Boolean).join(' · ') : ''
-        const pitchTokens = starters.map((player) => `<span class="report-token" style="left:${player.x}%;top:${player.y}%"><b>${escape(player.number)}</b><small>${escape(player.name.split(/\s+/).at(-1) || player.name)}</small></span>`).join('')
-        preview.innerHTML = `<article class="match-report-paper">
-          <div class="match-report-watermark"><b>NZ</b><span>NICOLA ZECCHI · MATCH REPORT</span></div>
-          <header class="match-report-hero"><div><span class="match-report-kicker">MATCH SHEET · ${escape(team.shortName || team.name)}</span><h2>${escape(d.opponent || 'Avversario da definire')}</h2><p>${escape(d.competition || '')} · ${escape(d.date || '')} · ${escape(d.location || '')}</p></div><div class="match-report-result"><small>RISULTATO</small><strong>${escape(d.result || '—')}</strong></div></header>
-          <div class="report-summary"><span><small>Sistema</small><b>${escape(formationName)}</b></span><span><small>1° tempo</small><b>${escape(d.half_result || '—')}</b></span><span><small>Casa/Trasferta</small><b>${escape(d.venue || '—')}</b></span></div>
-          <section class="report-lineup-section"><h3>Confronto sistemi di gioco</h3><div class="report-dual-pitches"><article><h4>${escape(team.shortName || team.name)} · ${escape(formationName)}</h4><div class="report-pitch"><span class="pitch-goal pitch-goal-top"></span><span class="pitch-goal pitch-goal-bottom"></span>${pitchTokens}</div></article><article><h4>${escape(d.opponent || 'Avversario')} · ${escape(opponentSystems[0]?.system || 'Da definire')}</h4><div class="report-pitch report-pitch--opponent"><span class="pitch-goal pitch-goal-top"></span><span class="pitch-goal pitch-goal-bottom"></span>${Array.from({length:11},(_,i)=>{const fallback=(formationLayouts[opponentSystems[0]?.system]||formationLayouts['4-4-2'])[i]||[50,50];const x=Number(d[`opponent_position_x_${i}`]||fallback[0]);const y=Number(d[`opponent_position_y_${i}`]||fallback[1]);return `<span class="report-token report-token--opponent" style="left:${x}%;top:${y}%"><b>${i+1}</b></span>`}).join('')}</div></article></div><div class="report-bench-strip"><h4>A disposizione</h4>${bench.length ? `<ol>${bench.map((item)=>`<li><b>${escape(item.number || '—')}</b> ${escape(item.name)}</li>`).join('')}</ol>` : '<p>Da definire</p>'}</div></section>
-          <section class="report-event-grid report-event-grid--three"><div><h3>Sostituzioni</h3>${substitutions.length ? `<ul>${substitutions.map((item)=>`<li><b>${escape(item.minute || '—')}’</b> ${escape(item.out || '—')} → ${escape(item.in || '—')} <small>${escape(item.reason || '')}</small></li>`).join('')}</ul>` : '<p>Nessuna</p>'}</div><div><h3>Gol e assist</h3>${goals.length ? `<ul>${goals.map((item)=>`<li><b>${escape(item.minute || '—')}’</b> ${escape(item.scorer || '—')}${item.assist ? ` · assist ${escape(item.assist)}` : ''}</li>`).join('')}</ul>` : '<p>Nessun gol registrato</p>'}</div><div><h3>Sanzioni</h3>${cards.length ? `<ul>${cards.map((item)=>`<li><b>${escape(item.minute || '—')}’</b> ${escape(item.player || '—')} · ${escape(item.type || '')}</li>`).join('')}</ul>` : '<p>Nessuna sanzione</p>'}</div></section>
-          <section><h3>Note propria squadra</h3>${ownNotes.length ? ownNotes.map((note)=>`<p>${escape(note)}</p>`).join('') : '<p>Da completare</p>'}</section>
-          <section class="report-two-cols"><div><h3>Sistemi avversari</h3>${opponentSystems.length ? `<ul>${opponentSystems.map((item,index)=>`<li><b>${index===0?'Iniziale':escape(item.minute || 'Cambio')}</b> · ${escape(item.system)}${item.note ? `<br><small>${escape(item.note)}</small>` : ''}</li>`).join('')}</ul>` : '<p>Da definire</p>'}</div><div><h3>Fasi avversarie</h3><h4>Possesso</h4>${possessionNotes.length ? possessionNotes.map(item=>`<p><b>${escape(item.label)}:</b> ${escape(item.note)}</p>`).join('') : '<p>—</p>'}<h4>Non possesso</h4>${nonPossessionNotes.length ? nonPossessionNotes.map(item=>`<p><b>${escape(item.label)}:</b> ${escape(item.note)}</p>`).join('') : '<p>—</p>'}</div></section><section><h3>Palle inattive avversarie</h3>${setPieces.length ? `<div class="report-set-pieces">${setPieces.map(item=>`<article><h4>${escape(item.label)}</h4><p>${escape(item.note)}</p></article>`).join('')}</div>` : '<p>Da completare</p>'}${penaltySummary ? `<p class="report-penalty"><b>Rigore:</b> ${escape(penaltySummary)}</p>` : ''}</section>
-          <section class="report-two-cols"><div><h3>Valutazione propria squadra</h3><p><b>Punti di forza:</b> ${escape(d.own_strengths || 'Da completare')}</p><p><b>Criticità:</b> ${escape(d.own_issues || 'Da completare')}</p></div><div><h3>Valutazione avversario</h3><p><b>Punti di forza:</b> ${escape(d.opp_strengths || 'Da completare')}</p><p><b>Punti deboli:</b> ${escape(d.opp_weaknesses || 'Da completare')}</p><p><b>Per il ritorno:</b> ${escape(d.return_notes || 'Da completare')}</p></div></section>
-        </article>`
-        const inlineData = {
-          1: `<strong>${escape(d.opponent || 'Avversario da definire')}</strong><span>${escape(d.competition || '—')} · ${escape(d.date || '—')} · ${escape(d.result || '—')}</span>`,
-          2: `<strong>${escape(team.shortName || team.name)} · ${escape(formationName)}</strong><span>${starters.filter((item)=>item.name && item.name !== 'Da definire').length}/11 titolari · ${bench.length} a disposizione</span>`,
-          3: `<strong>${escape(d.opponent || 'Avversario')}</strong><span>${escape(opponentSystems[0]?.system || 'Sistema da definire')} · ${possessionNotes.length + nonPossessionNotes.length} osservazioni</span>`,
-          4: `<strong>${substitutions.length} cambi · ${goals.length} gol · ${cards.length} sanzioni</strong><span>${ownNotes.length ? `${ownNotes.length} blocchi note compilati` : 'Note da completare'}</span>`
-        }
-        matchEditor.querySelectorAll('[data-match-inline-preview]').forEach((box) => {
-          box.innerHTML = `<span>ANTEPRIMA REPORT</span><div>${inlineData[box.dataset.matchInlinePreview] || ''}</div>`
-        })
-      }
+      const matchReportRenderer = createMatchReportRenderer({ escapeHtml: escape })
+      const matchReportService = createMatchReportService({
+        root: matchEditor,
+        collectData: collect,
+        getTeam: getTeamProfile,
+        renderer: matchReportRenderer,
+      })
+      const renderReport = () => matchReportService.render()
       const formationSelect=form.elements.formation
       const customFormationField = matchEditor.querySelector('[data-custom-formation]')
       const opponentFormationsRoot = matchEditor.querySelector('[data-opponent-formations]')
@@ -3607,8 +3667,8 @@ export async function attachAppEvents(user) {
         if (formationSelect.value === 'Personalizzato') applyFormation('Personalizzato')
       })
       matchEditor.querySelector('[data-reset-formation]')?.addEventListener('click',()=>{
-        for (let i = 0; i < 11; i += 1) setTokenPosition(i, 50, 50, false)
-        scheduleSave()
+        applyFormation(formationSelect.value)
+        renderReport()
       })
       const updateOpponentTokenStyle = () => {
         const primary = form.elements.opponent_token_primary?.value || '#9f1239'
@@ -3622,69 +3682,46 @@ export async function attachAppEvents(user) {
       form.addEventListener('input',()=>{updateTokens();updateOpponentTokenStyle();renderReport();scheduleSave()})
       form.addEventListener('change',()=>{updateTokens();updateOpponentTokenStyle();renderReport();scheduleSave()})
       next.addEventListener('click',()=>showStep(activeStep+1)); prev.addEventListener('click',()=>showStep(activeStep-1)); stepButtons.forEach(b=>b.addEventListener('click',()=>showStep(b.dataset.matchStepButton)))
-      matchEditor.querySelector('[data-match-reset]').addEventListener('click',()=>{if(confirm('Cancellare la Match Sheet?')){form.reset();localStorage.removeItem(storageKey);syncCustomFormation();applyFormation(form.elements.formation.value,false);renderNotes();updateTokens();showStep(1)}})
+      matchEditor.querySelector('[data-match-reset]').addEventListener('click',()=>{if(confirm('Cancellare la Match Sheet?')){form.reset();draftService.clear();syncCustomFormation();applyFormation(form.elements.formation.value,false);renderNotes();updateTokens();showStep(1)}})
       const fileInput=form.elements.opponent_sheet; fileInput.addEventListener('change',()=>{const file=fileInput.files?.[0]; const img=matchEditor.querySelector('[data-opponent-sheet-preview]'); if(file){img.src=URL.createObjectURL(file);img.hidden=false}})
-      const printMatchReport = (paper) => {
-        const printWindow = window.open('', '_blank', 'width=1100,height=900')
-        if (!printWindow) {
-          if (state) state.textContent = 'Il browser ha bloccato la finestra di stampa. Consenti i popup e riprova.'
-          return
-        }
-        const styleMarkup = [...document.querySelectorAll('link[rel="stylesheet"], style')]
-          .map((node) => node.outerHTML)
-          .join('')
-        const doc = printWindow.document
-        doc.open()
-        doc.write(`<!doctype html><html><head><meta charset="utf-8"><base href="${location.origin}/"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Match Report</title>${styleMarkup}</head><body class="match-print-body">${paper.outerHTML}</body></html>`)
-        doc.close()
-
-        const waitForAssets = async () => {
-          try { await doc.fonts?.ready } catch {}
-          const images = [...doc.images]
-          await Promise.all(images.map((image) => image.complete
-            ? Promise.resolve()
-            : new Promise((resolve) => {
-                image.addEventListener('load', resolve, { once: true })
-                image.addEventListener('error', resolve, { once: true })
-              })))
-          await new Promise((resolve) => printWindow.requestAnimationFrame(() => printWindow.requestAnimationFrame(resolve)))
-          await new Promise((resolve) => window.setTimeout(resolve, 250))
-        }
-
-        const runPrint = async () => {
-          await waitForAssets()
-          printWindow.focus()
-          printWindow.addEventListener('afterprint', () => printWindow.close(), { once: true })
-          printWindow.print()
-        }
-        if (doc.readyState === 'complete') runPrint()
-        else printWindow.addEventListener('load', runPrint, { once: true })
-      }
       const openMatchReportPreview = () => {
-        renderReport()
-        const paper = matchEditor.querySelector('.match-report-paper')
+        const { paper, validation } = matchReportService.getPrintablePaper()
         if (!paper) {
           if (state) state.textContent = 'Report non disponibile'
           return
         }
+        if (!validation.valid && state) {
+          state.textContent = `Report incompleto: ${validation.errors.join(' · ')}`
+        }
         document.querySelector('[data-match-report-dialog]')?.remove()
+        const trigger = document.activeElement
         const dialog = document.createElement('div')
         dialog.className = 'match-report-dialog'
         dialog.dataset.matchReportDialog = ''
         dialog.innerHTML = `<section class="match-report-dialog-panel" role="dialog" aria-modal="true" aria-label="Anteprima Match Report"><header><div><span>ANTEPRIMA DI STAMPA</span><h2>Match Report</h2></div><button type="button" data-close-match-report aria-label="Chiudi">×</button></header><div class="match-report-dialog-body">${paper.outerHTML}</div><footer><button type="button" class="secondary-button" data-close-match-report>Annulla</button><button type="button" class="primary-button" data-confirm-match-report>Stampa / salva PDF</button></footer></section>`
         document.body.appendChild(dialog)
         document.body.classList.add('modal-open')
-        const close = () => { dialog.remove(); document.body.classList.remove('modal-open') }
+        const close = () => {
+          dialog.remove()
+          document.body.classList.remove('modal-open')
+          trigger?.focus?.()
+        }
         dialog.querySelectorAll('[data-close-match-report]').forEach((button) => button.addEventListener('click', close))
         dialog.addEventListener('click', (event) => { if (event.target === dialog) close() })
+        dialog.addEventListener('keydown', (event) => { if (event.key === 'Escape') close() })
+        dialog.querySelector('[data-close-match-report]')?.focus()
         dialog.querySelector('[data-confirm-match-report]')?.addEventListener('click', () => {
           const printable = dialog.querySelector('.match-report-paper')
-          if (printable) printMatchReport(printable)
+          try {
+            printMatchReport(printable)
+          } catch (error) {
+            if (state) state.textContent = error.message || 'Impossibile aprire la stampa'
+          }
         })
       }
       pdf.addEventListener('click', openMatchReportPreview)
       try {
-        const saved=JSON.parse(localStorage.getItem(storageKey)||'null')
+        const saved = draftService.load()
         if(saved){
           const inferIndexes = (pattern) => Object.keys(saved).filter((key) => pattern.test(key)).map((key) => Number(key.match(/\d+/)?.[0])).filter(Number.isFinite).sort((a,b)=>a-b)
           const subIndexes = inferIndexes(/^sub_minute_\d+$/)
@@ -4030,114 +4067,50 @@ export async function attachAppEvents(user) {
       const createAndPublishPdf = async () => {
         const button = manualEditor.querySelector('[data-print-sheet]')
         const note = manualEditor.querySelector('[data-publish-note]')
-        const d = collect()
-        if (!d.date || !d.time || !d.location) {
-          if (note) note.textContent = 'Completa data, orario e campo prima di creare il PDF.'
-          return
-        }
-        if (!window.html2canvas || !window.jspdf?.jsPDF) {
-          if (note) note.textContent = 'Generatore PDF non disponibile. Controlla la connessione e ricarica la pagina.'
-          return
-        }
+        const rawData = collect()
         button.disabled = true
         button.classList.add('is-loading')
-        const originalLabel = button.querySelector('span')?.textContent || 'Crea PDF'
-        if (button.querySelector('span')) button.querySelector('span').textContent = 'Creazione…'
+        const label = button.querySelector('span')
+        const originalLabel = label?.textContent || 'Crea PDF'
+        if (label) label.textContent = 'Creazione…'
         if (note) note.textContent = 'Creazione e pubblicazione della Training Sheet…'
+
         try {
-          const captureRoot = document.createElement('div')
-          captureRoot.className = 'ts-capture-root'
-          const capturePaper = preview.cloneNode(true)
-          capturePaper.classList.add('ts-paper--capture')
-          capturePaper.style.width = '794px'
-          capturePaper.style.minWidth = '794px'
-          capturePaper.style.maxWidth = '794px'
-          capturePaper.style.transform = 'none'
-          capturePaper.style.margin = '0'
-          captureRoot.appendChild(capturePaper)
-          document.body.appendChild(captureRoot)
-          let canvas
-          try {
-            await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-            canvas = await window.html2canvas(capturePaper, {
-              scale: 2,
-              useCORS: true,
-              backgroundColor: '#ffffff',
-              logging: false,
-              width: 794,
-              height: capturePaper.scrollHeight,
-              windowWidth: 1280,
-            })
-          } finally {
-            captureRoot.remove()
-          }
-          const { jsPDF } = window.jspdf
-          const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true })
-          const pageWidth = 210
-          const pageHeight = 297
-          const margin = 5
-          const imageWidth = pageWidth - margin * 2
-          const imageHeight = canvas.height * imageWidth / canvas.width
-          const scale = Math.min(1, (pageHeight - margin * 2) / imageHeight)
-          const finalWidth = imageWidth * scale
-          const finalHeight = imageHeight * scale
-          pdf.addImage(canvas.toDataURL('image/jpeg', .96), 'JPEG', (pageWidth-finalWidth)/2, margin, finalWidth, finalHeight, undefined, 'FAST')
-          const blob = pdf.output('blob')
-          const progressive = String(Number(d.progressive || 1)).padStart(3, '0')
-          const [year, month, day] = d.date.split('-')
-          const safeDate = `${day || ''}${month || ''}${year || ''}`
-          const fileName = `ALL_${progressive} - ${safeDate}.pdf`
-          const filePath = `${d.date}/${fileName}`
-
-          if (note) note.textContent = 'Controlla l’anteprima e conferma il salvataggio.'
-          const confirmed = await confirmPdfPreview(blob, fileName)
-          if (!confirmed) {
-            if (note) note.textContent = 'Creazione PDF annullata. Nessun file è stato salvato.'
-            return
-          }
-          if (note) note.textContent = 'Salvataggio e collegamento al Calendario…'
-
           const existingEvent = calendarEvents.find((event) => String(event.id) === String(currentEditingEventId))
             || calendarEvents.find((event) => {
               if (!isTrainingEventType(event.type)) return false
-              const localDate = new Date(event.startAt).toLocaleDateString('sv-SE')
-              return localDate === d.date
+              return new Date(event.startAt).toLocaleDateString('sv-SE') === rawData.date
             })
 
-          const upload = await supabase.storage.from('training-sheets').upload(filePath, blob, {
-            contentType: 'application/pdf', cacheControl: '3600', upsert: true,
+          const result = await publishTrainingSheet({
+            rawData,
+            previewElement: preview,
+            team: getTeamProfile(),
+            squadTotal,
+            existingEvent,
+            confirmPreview: confirmPdfPreview,
+            createEvent: createCalendarEvent,
+            updateEvent: updateCalendarEvent,
           })
-          if (upload.error) throw upload.error
 
-          const eventPayload = {
-            title: 'Allenamento', event_type: 'training',
-            start_at: new Date(`${d.date}T${d.time}:00`).toISOString(),
-            location: d.location || null, match_day: d.match_day || null,
-            present_count: Number(d.present) || 0, squad_total: squadTotal,
-            training_sheet_path: filePath,
-            notes: JSON.stringify({ type: 'training_sheet_editor', version: 1, data: d }),
-          }
-          const result = existingEvent
-            ? await supabase.from('events').update(eventPayload).eq('id', existingEvent.id)
-            : await supabase.from('events').insert(eventPayload)
-          if (result.error) {
-            await supabase.storage.from('training-sheets').remove([filePath])
-            throw result.error
+          if (result.cancelled) {
+            if (note) note.textContent = 'Creazione PDF annullata. Nessun file è stato salvato.'
+            return
           }
 
-          pdf.save(fileName)
-          localStorage.setItem('nz-training-sheet-next-progressive', String(Number(d.progressive || 1) + 1))
-          localStorage.setItem(`nz-training-sheet:${filePath}`, JSON.stringify(d))
+          localStorage.setItem('nz-training-sheet-next-progressive', String(Number(result.data.progressive || 1) + 1))
+          localStorage.setItem(`nz-training-sheet:${result.filePath}`, JSON.stringify(result.data))
           await loadCalendarEvents()
+          currentEditingEventId = existingEvent?.id || currentEditingEventId
           if (note) note.textContent = 'PDF creato e Training Sheet collegata al Calendario.'
           if (draftState) draftState.textContent = 'Pubblicata'
         } catch (error) {
           console.error('Errore pubblicazione Training Sheet:', error)
-          if (note) note.textContent = `Errore: ${error?.message || 'pubblicazione non riuscita'}`
+          if (note) note.textContent = getUserErrorMessage(error, 'Pubblicazione non riuscita. Il documento precedente è rimasto invariato.')
         } finally {
           button.disabled = false
           button.classList.remove('is-loading')
-          if (button.querySelector('span')) button.querySelector('span').textContent = originalLabel
+          if (label) label.textContent = originalLabel
         }
       }
       const resetEditor = () => {
@@ -4183,13 +4156,10 @@ export async function attachAppEvents(user) {
           // Lettura diretta come fallback: evita che cache o lista eventi non aggiornata
           // impediscano di riaprire una Training Sheet appena pubblicata.
           if (!selected?.editorData && supabase) {
-            const { data: rawEvent, error } = await supabase
-              .from('events')
-              .select('*')
-              .eq('id', eventId)
-              .maybeSingle()
+            let rawEvent = null
+            try { rawEvent = await getCalendarEvent(eventId) } catch (_) {}
 
-            if (!error && rawEvent) {
+            if (rawEvent) {
               let parsedNotes = {}
               try { parsedNotes = JSON.parse(rawEvent.notes || '{}') } catch { parsedNotes = {} }
               selected = {
@@ -4464,7 +4434,10 @@ export async function attachAppEvents(user) {
       if (open) createStaffPanel.querySelector('input[name="first_name"]')?.focus()
     }
 
-    root.querySelector('[data-toggle-create-staff]')?.addEventListener('click', () => toggleCreateStaff(createStaffPanel?.hidden !== false))
+    root.querySelector('[data-toggle-create-staff]')?.addEventListener('click', () => {
+      if (!can(ACCESS_CAPABILITIES.STAFF_CREATE)) { showAccessNotice(); return }
+      toggleCreateStaff(createStaffPanel?.hidden !== false)
+    })
     root.querySelector('[data-close-create-staff]')?.addEventListener('click', () => toggleCreateStaff(false))
     root.querySelector('[data-cancel-create-staff]')?.addEventListener('click', () => {
       createStaffPanel?.reset()
@@ -4480,6 +4453,7 @@ export async function attachAppEvents(user) {
     })
     createStaffPanel?.addEventListener('submit', async (event) => {
       event.preventDefault()
+      if (!can(ACCESS_CAPABILITIES.STAFF_CREATE)) { showAccessNotice(); return }
       const form = event.currentTarget
       const message = form.querySelector('[data-create-staff-message]')
       const submit = form.querySelector('button[type="submit"]')
@@ -4514,6 +4488,7 @@ export async function attachAppEvents(user) {
     root.querySelectorAll('[data-staff-form]').forEach((form) => {
       form.addEventListener('submit', async (event) => {
         event.preventDefault()
+        if (!can(ACCESS_CAPABILITIES.STAFF_UPDATE)) { showAccessNotice(); return }
         const userId = form.dataset.userId
         const data = new FormData(form)
         const message = form.querySelector('[data-staff-message]')
@@ -4526,16 +4501,17 @@ export async function attachAppEvents(user) {
           updated_at: new Date().toISOString(),
         }
 
-        const { error } = await supabase.rpc('admin_update_staff_profile', {
-          p_user_id: userId,
-          p_first_name: payload.first_name,
-          p_last_name: payload.last_name,
-          p_role: payload.role,
-          p_app_role: payload.app_role,
-          p_active: payload.active,
-        })
-        if (error) {
-          message.textContent = error.message
+        try {
+          await updateStaffProfile({
+            userId,
+            firstName: payload.first_name,
+            lastName: payload.last_name,
+            technicalRole: payload.role,
+            accessRole: payload.app_role,
+            active: payload.active,
+          })
+        } catch (error) {
+          message.textContent = error?.message || 'Aggiornamento non riuscito.'
           message.className = 'form-message is-error'
           return
         }
@@ -4546,7 +4522,7 @@ export async function attachAppEvents(user) {
         if (userId === currentUser.id) {
           currentUserProfile = { ...currentUserProfile, ...payload }
           currentUserRole = payload.role
-          currentUserAppRole = payload.app_role
+          setAccessRole(payload.app_role)
           syncProfileHeader()
         }
       })
@@ -4554,6 +4530,7 @@ export async function attachAppEvents(user) {
 
     root.querySelectorAll('[data-delete-staff-user]').forEach((button) => {
       button.addEventListener('click', async () => {
+        if (!can(ACCESS_CAPABILITIES.STAFF_DELETE)) { showAccessNotice(); return }
         const form = button.closest('[data-staff-form]')
         const userId = form?.dataset.userId
         const name = form?.querySelector('[data-staff-message]')?.closest('.staff-member-actions')?.querySelector('.staff-member-name')?.textContent?.trim() || 'questo utente'
@@ -5025,6 +5002,8 @@ export async function attachAppEvents(user) {
     })
   }
 
+  bindGlobalAccessGuard()
+
   document
     .querySelectorAll('.nav-item')
     .forEach((button) => {
@@ -5116,8 +5095,10 @@ export async function attachAppEvents(user) {
   await bindDynamic()
 
   const savedSection = localStorage.getItem('nz-active-section')
-  if (savedSection && savedSection !== 'dashboard' && menu.some(([key]) => key === savedSection)) {
+  if (savedSection && savedSection !== 'dashboard' && menu.some(([key]) => key === savedSection) && canAccessSection(savedSection)) {
     setActiveNavigation(savedSection)
     await setView(savedSection, menu.find(([key]) => key === savedSection)?.[1] || '')
+  } else if (savedSection && !canAccessSection(savedSection)) {
+    localStorage.setItem('nz-active-section', getFirstAccessibleSection(menu))
   }
 }

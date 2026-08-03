@@ -1,0 +1,16 @@
+RELEASE A.11.2.3 — PRINT CSS ISOLATION
+
+Causa individuata:
+Le regole legacy globali @media print della Training Sheet applicavano
+"body * { visibility:hidden !important; }" a qualsiasi pagina di stampa.
+La pagina print.html mostrava correttamente il Match Report a schermo,
+ma Chrome riceveva un print tree completamente nascosto.
+
+Correzione:
+- print.html marca esplicitamente il documento con la classe
+  html.print-engine-document.
+- style.css contiene un blocco finale e canonico che isola la pagina
+  dedicata dalle regole di stampa legacy e ripristina visibilità,
+  dimensioni e overflow.
+
+Nessun SQL, nessuna Edge Function, nessuna modifica RLS o Storage.

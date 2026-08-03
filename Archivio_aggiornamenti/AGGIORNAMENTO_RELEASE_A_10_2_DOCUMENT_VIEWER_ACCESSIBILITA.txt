@@ -1,0 +1,8 @@
+RELEASE A.10.2 — DOCUMENT VIEWER CONDIVISO E ACCESSIBILITÀ
+
+- Viewer documenti condiviso e riutilizzabile per PDF e immagini.
+- Pulsante "Visualizza Training Sheet" disponibile anche per utenti Solo lettura.
+- Capability dedicata trainingSheet.viewPublished.
+- Dialog a schermo ampio, responsive, con focus trap, ESC e ripristino del focus.
+- Correzione warning aria-hidden del menu profilo tramite inert e gestione del focus.
+- Nessuna modifica database, RLS o Edge Function.

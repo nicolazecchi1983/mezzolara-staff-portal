@@ -1,0 +1,11 @@
+RELEASE A.10 - TRAINING SHEET WORKFLOW E ARCHITETTURA
+
+- Estratto il flusso PDF dal monolite app.js.
+- Creati Model, PDF generator, Repository Storage, Service e Permissions del modulo Training.
+- Pubblicazione e modifica usano la stessa capability centrale trainingSheet.publish.
+- Ogni modifica genera un nuovo PDF versionato, evitando cache e sovrascritture rischiose.
+- Il nuovo file viene caricato prima dell'aggiornamento evento; in caso di errore viene rimosso.
+- Il vecchio PDF viene eliminato solo dopo il collegamento riuscito del nuovo.
+- Percorso Storage predisposto per multi-team: team/stagione/data/versione-file.
+- Aggiunto SQL ufficiale per bucket e policy Storage isolate per squadra.
+- Compatibilità mantenuta per i PDF storici.

@@ -1,0 +1,10 @@
+RELEASE A.5 - PERMESSI APPLICATIVI CENTRALIZZATI
+
+- Policy unica per Proprietario, Amministratore, Collaboratore e Solo lettura.
+- Gestione Staff disponibile solo a Proprietario e Amministratore.
+- Identità squadra disponibile solo al Proprietario.
+- Collaboratore autorizzato a lavorare sui contenuti sportivi.
+- Solo lettura può consultare il portale, usare ricerca e gestire il proprio profilo/password, ma non modificare i dati sportivi.
+- Blocco centralizzato di click e submit non autorizzati.
+- Controlli dei form disabilitati e messaggio chiaro per account in sola lettura.
+- Reindirizzamento sicuro alla Dashboard quando viene richiesta una sezione non autorizzata.

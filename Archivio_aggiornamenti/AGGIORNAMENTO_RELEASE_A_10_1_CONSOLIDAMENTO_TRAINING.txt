@@ -1,0 +1,9 @@
+RELEASE A.10.1 - CONSOLIDAMENTO TRAINING SHEET
+
+- Policy Storage storiche e duplicate eliminate dallo script ufficiale.
+- Policy canoniche multi-team per lettura, upload, aggiornamento ed eliminazione.
+- Adapter Storage centrale introdotto in src/core/storage.
+- Errori applicativi normalizzati in src/core/appError.js.
+- Pubblicazione Training Sheet protetta con rollback esplicito.
+- Il vecchio PDF viene rimosso solo dopo il collegamento riuscito del nuovo file.
+- Messaggi utente semplificati; dettagli tecnici mantenuti in Console.

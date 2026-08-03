@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Preparazione stampa</title>
+    <style>
+      html, body { min-height: 100%; margin: 0; }
+      body { background: #fff; }
+      .print-engine-status {
+        box-sizing: border-box;
+        max-width: 720px;
+        margin: 64px auto;
+        padding: 24px;
+        font: 16px/1.5 system-ui, sans-serif;
+        color: #10213a;
+      }
+      .print-engine-error { color: #9f1239; }
+      @media print {
+        .print-engine-status { display: none !important; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="printStatus" class="print-engine-status" role="status">Preparazione del documento…</div>
+    <main id="printRoot"></main>
+    <script>
+      (() => {
+        const PREFIX = 'staff-print-payload:'
+        const MAX_AGE_MS = 2 * 60 * 1000
+        const status = document.getElementById('printStatus')
+        const root = document.getElementById('printRoot')
+
+        const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve))
+        const waitForImages = () => Promise.all([...document.images].map((image) => {
+          if (image.complete) return Promise.resolve()
+          return new Promise((resolve) => {
+            image.addEventListener('load', resolve, { once: true })
+            image.addEventListener('error', resolve, { once: true })
+          })
+        }))
+
+        const fail = (message, error) => {
+          console.error('[PrintEngine]', error || message)
+          status.textContent = message
+          status.classList.add('print-engine-error')
+        }
+
+        async function start() {
+          const token = new URLSearchParams(location.search).get('token')
+          if (!token) return fail('Documento di stampa non disponibile.')
+
+          const key = `${PREFIX}${token}`
+          const rawPayload = localStorage.getItem(key)
+          localStorage.removeItem(key)
+          if (!rawPayload) return fail('Il documento di stampa è scaduto o non è disponibile.')
+
+          let payload
+          try {
+            payload = JSON.parse(rawPayload)
+          } catch (error) {
+            return fail('Il documento di stampa non è valido.', error)
+          }
+
+          if (!payload?.content || Date.now() - Number(payload.createdAt || 0) > MAX_AGE_MS) {
+            return fail('Il documento di stampa è scaduto.')
+          }
+
+          document.title = payload.title || 'Documento'
+          if (payload.baseHref) {
+            const base = document.createElement('base')
+            base.href = payload.baseHref
+            document.head.prepend(base)
+          }
+          if (payload.styles) document.head.insertAdjacentHTML('beforeend', payload.styles)
+          document.body.className = payload.bodyClass || ''
+          root.innerHTML = payload.content
+          status.remove()
+
+          try {
+            await document.fonts?.ready
+            await waitForImages()
+            await nextFrame()
+            await nextFrame()
+
+            const printable = root.firstElementChild
+            const rect = printable?.getBoundingClientRect()
+            if (!printable || !rect || rect.width < 20 || rect.height < 20) {
+              throw new Error('Contenuto stampabile privo di dimensioni')
+            }
+
+            window.addEventListener('afterprint', () => {
+              if (payload.autoClose !== false) window.close()
+            }, { once: true })
+            window.focus()
+            window.print()
+          } catch (error) {
+            fail('Non è stato possibile preparare il documento per la stampa.', error)
+          }
+        }
+
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', start, { once: true })
+        } else {
+          start()
+        }
+      })()
+    </script>
+  </body>
+</html>
