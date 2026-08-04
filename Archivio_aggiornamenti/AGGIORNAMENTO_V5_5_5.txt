@@ -1,8 +1,0 @@
-AGGIORNAMENTO V5.5.5
-
-- Nome proprietario visualizzato come Nicola Zecchi, senza suffisso 83.
-- Iniziale profilo calcolata dal nome visualizzato.
-- Avatar del menu profilo reso leggibile e centrato.
-- Pannelli inferiori Dashboard allineati realmente alla stessa altezza su desktop.
-- Rimossa l'interferenza di grid-row: span 2 dal pannello Oggi.
-- Nessuna modifica SQL richiesta.

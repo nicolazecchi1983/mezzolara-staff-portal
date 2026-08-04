@@ -1,5 +1,0 @@
-AGGIORNAMENTO V5.5.7
-
-- Centratura precisa dell'iniziale negli avatar del profilo.
-- Correzione applicata sia all'avatar nella barra superiore sia all'avatar nel menu aperto.
-- Nessuna modifica al menu profilo, alla Dashboard o a Supabase.

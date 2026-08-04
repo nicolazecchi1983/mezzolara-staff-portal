@@ -1,9 +1,0 @@
-RELEASE A.11.2.2 - PRINT ENGINE CONDIVISO
-
-- Sostituito il flusso fragile basato su about:blank e document.write().
-- Aggiunto src/shared/print/printEngine.js come servizio condiviso per i documenti STAFF.
-- Aggiunta public/print.html, pagina dedicata alla preparazione e impaginazione di stampa.
-- Il Match Report delega ora al Print Engine senza contenere logica di caricamento/stampa.
-- Attesa reale di font, immagini e rendering prima di window.print().
-- Payload temporaneo monouso, rimosso subito dalla memoria locale.
-- Nessuna modifica a database, Supabase, RLS o Storage.

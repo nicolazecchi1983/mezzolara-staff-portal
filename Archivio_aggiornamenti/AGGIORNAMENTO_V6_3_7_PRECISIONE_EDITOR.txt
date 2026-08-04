@@ -1,8 +1,0 @@
-V6.3.7 — Precisione editor e documento
-
-- Footer scheda giocatore sempre visibile su PC e smartphone.
-- Data e orario non si sovrappongono; layout Dati seduta riequilibrato.
-- Rosa visualizzata Cognome Nome e nella Training Sheet solo cognome.
-- Ogni fase mostra inizialmente un solo campo Note; Varianti e Coaching point sono opzionali.
-- Nome PDF nel formato: ALL_008 - 31072026.pdf.
-- Filigrana NZ / NICOLA ZECCHI ridisegnata con stile più sottile, minimal ed elegante.

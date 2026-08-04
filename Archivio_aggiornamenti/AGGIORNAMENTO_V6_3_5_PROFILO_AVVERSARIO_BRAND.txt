@@ -1,7 +1,0 @@
-V6.3.5 — Correzioni mirate
-
-- Il campo Avversario viene valorizzato realmente con “Da definire” quando si seleziona Partita.
-- La scheda giocatore su smartphone usa un layout a pagina intera con intestazione e azioni fisse.
-- Note tecniche e Note infortuni sono sempre raggiungibili e dispongono di spazio adeguato.
-- Il pulsante Salva scheda resta sempre visibile sopra la barra di sistema del telefono.
-- Branding coerente: desktop logo NZ + nome; smartphone solo riquadro NZ, con forma e gradiente uniformi.

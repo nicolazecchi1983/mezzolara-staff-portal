@@ -1,7 +1,0 @@
-AGGIORNAMENTO V5.5.2
-
-- Corretto il menu profilo che non si apriva su alcuni account e su smartphone.
-- Il pulsante profilo ora risponde sull'intera area, non soltanto sulla freccia.
-- Aggiunta gestione touch specifica per dispositivi mobili.
-- Corretto il nome di fallback: un collaboratore senza nome impostato non viene più mostrato come "Nicola Zecchi".
-- Nessuna modifica a Supabase richiesta.

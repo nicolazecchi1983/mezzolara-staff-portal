@@ -20,6 +20,9 @@ const allowedSupabaseImports = new Set([
   'src/services/staffAdmin.js',
   'src/services/teamProfile.js',
   'src/core/storage/teamStorage.js',
+  'src/infrastructure/repositories/fileStorageRepository.js',
+  'src/infrastructure/repositories/matchAnalysisRepository.js',
+  'src/infrastructure/repositories/profileRepository.js',
   'src/modules/calendar/calendarService.js',
   'src/modules/staff/staffService.js',
   // Debito tecnico noto: da estrarre progressivamente dalla UI.

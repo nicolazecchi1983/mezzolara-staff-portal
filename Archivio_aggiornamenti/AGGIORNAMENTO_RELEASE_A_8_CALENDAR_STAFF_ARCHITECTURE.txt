@@ -1,9 +1,0 @@
-RELEASE A.8 - CALENDARIO SICURO E REFACTOR PROGRESSIVO STAFF
-
-- Corrette le policy RLS del Calendario per Proprietario, Amministratore e Collaboratore.
-- Solo lettura può consultare gli eventi ma non modificarli.
-- Aggiunti team_id, created_by e updated_at agli eventi.
-- Aggiunto trigger sicuro per associare automaticamente evento, utente e squadra.
-- Estratto il repository Calendario da app.js in src/modules/calendar/calendarService.js.
-- Estratto il caricamento e aggiornamento Staff in src/modules/staff/staffService.js.
-- Nessuna nuova funzione di prodotto e nessuna modifica estetica.

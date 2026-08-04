@@ -1,8 +1,0 @@
-V6.3.4 — Mobile reale, filigrana e avversario
-
-- Corretto overflow orizzontale su dispositivi reali Android/iOS.
-- Dashboard, calendario settimanale e Training Sheet confinati alla viewport.
-- Titoli partita e testi lunghi ora vanno a capo senza allargare la pagina.
-- Match Day su smartphone disposto su due righe senza scroll orizzontale.
-- Filigrana NZ / NICOLA ZECCHI resa più marcata e sovrapposta ai contenuti per tutelare gli screenshot.
-- Campo Avversario precompilato con “Da definire”.

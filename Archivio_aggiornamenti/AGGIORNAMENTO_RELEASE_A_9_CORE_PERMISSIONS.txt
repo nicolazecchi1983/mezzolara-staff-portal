@@ -1,8 +1,0 @@
-RELEASE A.9 - CORE PERMISSIONS E ARCHITETTURA PROGRESSIVA
-
-- Introdotto src/core/permissions.js come unica sorgente runtime del ruolo attivo.
-- Introdotto src/core/accessGuard.js per blocchi UI e messaggi di accesso.
-- Rimossi da app.js i controlli DOM globali e lo stato ruolo duplicato.
-- Sidebar, routing, pagine e azioni usano lo stesso runtime dei permessi.
-- Nessuna nuova funzione utente e nessuna modifica grafica.
-- Consolidata la correzione del trigger calendario nel file SQL A.9.
