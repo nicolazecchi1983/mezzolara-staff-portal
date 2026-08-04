@@ -28,7 +28,7 @@ export function createMatchLibraryView({
       </div>
       <div class="match-library-status"><span>${escapeHtml(match.documentStatus)}</span><small>${match.source === 'calendar' ? 'Calendario' : 'Archivio'}</small></div>
       <div class="match-library-actions">
-        <button type="button" class="button button--primary" data-open-match-sheet="${escapeHtml(match.id)}" data-match-opponent="${escapeHtml(match.opponent)}" data-match-date="${escapeHtml(match.date)}">Apri Match Sheet</button>
+        <button type="button" class="button button--primary" data-open-match-workspace="${escapeHtml(match.id)}" data-match-opponent="${escapeHtml(match.opponent)}" data-match-date="${escapeHtml(match.date)}">Apri partita</button>
         ${match.source === 'library' ? `<button type="button" class="icon-button" data-delete-library-match="${escapeHtml(match.id)}" aria-label="Elimina gara">×</button>` : ''}
       </div>
     </article>`

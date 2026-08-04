@@ -27,6 +27,7 @@ import { bindPitchTokenDragging } from '../shared/pitch/dragController.js'
 import { createMatchDraftService } from '../modules/match/matchService.js'
 import { createMatchCalendarService } from '../modules/match/matchCalendarService.js'
 import { createMatchLibraryService } from '../modules/match/matchLibraryService.js'
+import { createMatchWorkspaceView } from '../modules/match/ui/matchWorkspaceView.js'
 import { getMatchOutcome } from '../modules/match/matchLibraryModel.js'
 import { normalizeScore } from '../modules/match/matchModel.js'
 import { createMatchReportRenderer } from '../modules/match/matchReportRenderer.js'
@@ -294,33 +295,93 @@ const menu = [
   ['training-sheet', 'Training Sheet Editor'],
   ['library', 'Training Library'],
   ['match-library', 'Match Library'],
+  ['callups', 'Convocazioni'],
   ['match-sheet', 'Match Sheet Editor'],
+  ['analysis', 'Analisi Gare'],
   ['board', 'Board'],
   ['squad', 'Rosa'],
-  ['analysis', 'Analisi Gare'],
   ['methodology', 'Metodologia'],
   ['settings', 'Impostazioni'],
+]
+
+const sidebarGroups = [
+  {
+    key: 'primary',
+    items: [
+      ['dashboard', 'Dashboard', 'dashboard'],
+      ['calendar', 'Calendario', 'calendar'],
+    ],
+  },
+  {
+    key: 'training',
+    label: 'Training',
+    items: [
+      ['training-sheet', 'Training Sheet', 'training-sheet'],
+      ['library', 'Training Library', 'library'],
+    ],
+  },
+  {
+    key: 'match',
+    label: 'Match',
+    items: [
+      ['match-library', 'Match Library', 'match-library'],
+    ],
+  },
+  {
+    key: 'management',
+    items: [
+      ['board', 'Board', 'board'],
+      ['squad', 'Rosa', 'squad'],
+      ['methodology', 'Metodologia', 'methodology'],
+      ['settings', 'Impostazioni', 'settings'],
+    ],
+  },
 ]
 
 function accessibleMenu() {
   return filterAccessibleMenu(menu)
 }
 
+function isMenuItemAccessible(sectionKey) {
+  return accessibleMenu().some(([key]) => key === sectionKey)
+}
+
+function menuItemHtml([key, label, iconKey], isActive = false) {
+  if (!isMenuItemAccessible(key)) return ''
+  return `
+    <button
+      class="nav-item ${isActive ? 'is-active' : ''}"
+      type="button"
+      data-section="${key}"
+    >
+      <span class="nav-icon">${icon(iconKey || key)}</span>
+      <span>${label}</span>
+    </button>
+  `
+}
+
 function menuHtml() {
-  return accessibleMenu()
-    .map(
-      ([key, label], index) => `
-        <button
-          class="nav-item ${index === 0 ? 'is-active' : ''}"
-          type="button"
-          data-section="${key}"
-        >
-          <span class="nav-icon">${icon(key)}</span>
-          <span>${label}</span>
-        </button>
-      `,
-    )
-    .join('')
+  let firstVisible = true
+  return sidebarGroups.map((group) => {
+    const items = group.items
+      .map((item) => {
+        const html = menuItemHtml(item, firstVisible)
+        if (html) firstVisible = false
+        return html
+      })
+      .join('')
+
+    if (!items) return ''
+    if (!group.label) return `<div class="nav-group nav-group--plain">${items}</div>`
+
+    return `<section class="nav-group" data-nav-group="${group.key}">
+      <button class="nav-group-toggle" type="button" aria-expanded="true" data-nav-group-toggle="${group.key}">
+        <span>${group.label}</span>
+        <span class="nav-group-chevron" aria-hidden="true">⌄</span>
+      </button>
+      <div class="nav-group-items">${items}</div>
+    </section>`
+  }).join('')
 }
 
 function startOfToday() {
@@ -719,6 +780,59 @@ function calendarView() {
   `
 }
 
+function getActiveMatchContext() {
+  try {
+    return JSON.parse(localStorage.getItem('staff-active-match') || 'null') || null
+  } catch {
+    return null
+  }
+}
+
+function callupsPanelHtml({ visible = false } = {}) {
+  const activePlayers = players.filter((player) => player.name !== 'Andrea Giovannini')
+  const activeMatch = getActiveMatchContext()
+  const matchLabel = activeMatch?.opponent ? `vs ${activeMatch.opponent}` : ''
+  const matchDate = activeMatch?.date || ''
+  return `
+    <section class="callups-panel callups-panel--standalone" data-callups-panel ${visible ? '' : 'hidden'}>
+      <div class="callups-head">
+        <div><span>CONVOCAZIONI</span><h2>Lista convocati</h2><p>Seleziona fino a 20 giocatori. Puoi sbloccare posti aggiuntivi solo quando necessario.</p></div>
+        <div class="callups-counter"><strong data-callups-count>0</strong><span>/ 20</span></div>
+      </div>
+      <div class="callups-toolbar">
+        <label><span>Partita / avversario</span><input data-callups-match placeholder="Es. Copparese" value="${escapeHtml(matchLabel)}" readonly></label>
+        <label><span>Data</span><input type="date" data-callups-date value="${escapeHtml(matchDate)}" readonly></label>
+        <button class="ghost-button" type="button" data-callups-extra>Aggiungi valutazione extra</button>
+        <button class="primary-action" type="button" data-callups-pdf disabled>Crea PDF convocazioni</button>
+      </div>
+      <div class="callups-alert" data-callups-alert hidden>Hai raggiunto 20 convocati.</div>
+      <div class="callups-list">
+        ${activePlayers
+          .slice()
+          .sort((a,b)=>String(a.name).split(/\s+/).pop().localeCompare(String(b.name).split(/\s+/).pop(),'it'))
+          .map((player,index)=>`<label class="callup-player"><input type="checkbox" value="${escapeHtml(player.name)}" data-callup-player><b data-callup-order>${String(index+1).padStart(2,'0')}</b><span>${escapeHtml(player.name)}</span><small>${escapeHtml(player.role)}</small></label>`)
+          .join('')}
+      </div>
+    </section>
+  `
+}
+
+function callupsView() {
+  const activeMatch = getActiveMatchContext()
+  const opponent = activeMatch?.opponent || 'Partita selezionata'
+  return `
+    <section class="view page-view">
+      <div class="page-head">
+        <div>
+          <h1>Convocazioni · ${escapeHtml(opponent)}</h1>
+          <p><span>MATCH WORKSPACE</span><b>•</b>Selezione giocatori per questa gara</p>
+        </div>
+      </div>
+      ${callupsPanelHtml({ visible: true })}
+    </section>
+  `
+}
+
 function squadView() {
   const roleOrder = ['Portiere', 'Difensore', 'Centrocampista', 'Attaccante']
   const roleLabels = {
@@ -750,30 +864,8 @@ function squadView() {
         </div>
         <div class="page-actions">
           <button class="primary-action" type="button">${icon('plus')}Nuovo giocatore</button>
-          <button class="ghost-button" type="button" data-open-callups>Convocazioni</button>
         </div>
       </div>
-
-      <section class="callups-panel" data-callups-panel hidden>
-        <div class="callups-head">
-          <div><span>CONVOCAZIONI</span><h2>Lista convocati</h2><p>Seleziona fino a 20 giocatori. Puoi sbloccare posti aggiuntivi solo quando necessario.</p></div>
-          <div class="callups-counter"><strong data-callups-count>0</strong><span>/ 20</span></div>
-        </div>
-        <div class="callups-toolbar">
-          <label><span>Partita / avversario</span><input data-callups-match placeholder="Es. Copparese"></label>
-          <label><span>Data</span><input type="date" data-callups-date></label>
-          <button class="ghost-button" type="button" data-callups-extra>Aggiungi valutazione extra</button>
-          <button class="primary-action" type="button" data-callups-pdf disabled>Crea PDF convocazioni</button>
-        </div>
-        <div class="callups-alert" data-callups-alert hidden>Hai raggiunto 20 convocati.</div>
-        <div class="callups-list">
-          ${activePlayers
-            .slice()
-            .sort((a,b)=>String(a.name).split(/\s+/).pop().localeCompare(String(b.name).split(/\s+/).pop(),'it'))
-            .map((player,index)=>`<label class="callup-player"><input type="checkbox" value="${escapeHtml(player.name)}" data-callup-player><b data-callup-order>${String(index+1).padStart(2,'0')}</b><span>${escapeHtml(player.name)}</span><small>${escapeHtml(player.role)}</small></label>`)
-            .join('')}
-        </div>
-      </section>
 
       <div class="squad-departments">
         ${groupedPlayers.map((group) => `
@@ -822,6 +914,8 @@ function analysisOutcomeClass(value) {
 }
 
 function analysisView() {
+  const activeMatch = getActiveMatchContext()
+  const opponent = activeMatch?.opponent || 'Partita selezionata'
   const items = analysisEntries.map((entry) => `
     <article class="match-analysis-row">
       <div class="match-analysis-minute">${entry.minute ? `${escapeHtml(entry.minute)}'` : '—'}</div>
@@ -844,8 +938,8 @@ function analysisView() {
     <section class="view page-view analysis-view">
       <div class="page-head analysis-page-head">
         <div>
-          <h1>Analisi Gare</h1>
-          <p><span>OSSERVAZIONI PARTITA</span><b>•</b>Google Form + Supabase</p>
+          <h1>Analisi gara · ${escapeHtml(opponent)}</h1>
+          <p><span>MATCH WORKSPACE</span><b>•</b>Google Form + Supabase</p>
         </div>
         <div class="page-actions analysis-actions">
           <a class="ghost-button analysis-form-link" href="https://docs.google.com/forms/d/1dMx3J-lz8loospyKAx8Fdfi0oh0W1cGkUFZBMu6U_WU/edit" target="_blank" rel="noopener noreferrer">Apri Google Form</a>
@@ -1326,6 +1420,14 @@ function trainingSheetResultHtml(result) {
 }
 
 
+const matchWorkspaceView = createMatchWorkspaceView({
+  storage: localStorage,
+  createMatchLibraryService,
+  getCalendarEvents: () => calendarEvents,
+  getTeamProfile,
+  escapeHtml,
+})
+
 function matchLibraryView() {
   const service = createMatchLibraryService({ storage: localStorage })
   const season = getTeamProfile().season || ''
@@ -1347,7 +1449,7 @@ function matchLibraryView() {
       </div>
       <div class="match-library-status"><span>${escapeHtml(match.documentStatus)}</span><small>${match.source === 'calendar' ? 'Calendario' : 'Archivio'}</small></div>
       <div class="match-library-actions">
-        <button type="button" class="button button--primary" data-open-match-sheet="${escapeHtml(match.id)}" data-match-opponent="${escapeHtml(match.opponent)}" data-match-date="${escapeHtml(match.date)}">Apri Match Sheet</button>
+        <button type="button" class="button button--primary" data-open-match-workspace="${escapeHtml(match.id)}" data-match-opponent="${escapeHtml(match.opponent)}" data-match-date="${escapeHtml(match.date)}">Apri partita</button>
         ${match.source === 'library' ? `<button type="button" class="icon-button" data-delete-library-match="${escapeHtml(match.id)}" aria-label="Elimina gara">×</button>` : ''}
       </div>
     </article>`
@@ -2439,10 +2541,14 @@ export async function attachAppEvents(user) {
     document
       .querySelectorAll('.nav-item')
       .forEach((item) => {
-        item.classList.toggle(
-          'is-active',
-          item.dataset.section === sectionKey,
-        )
+        const isActive = item.dataset.section === sectionKey
+        item.classList.toggle('is-active', isActive)
+        if (isActive) {
+          const group = item.closest('[data-nav-group]')
+          const toggle = group?.querySelector('[data-nav-group-toggle]')
+          group?.classList.remove('is-collapsed')
+          toggle?.setAttribute('aria-expanded', 'true')
+        }
       })
   }
 
@@ -2459,7 +2565,7 @@ export async function attachAppEvents(user) {
   document.body.classList.remove('drawer-open', 'new-event-modal-open')
   document.body.style.removeProperty('overflow')
 
-  if (key === 'calendar' || key === 'dashboard' || key === 'library' || key === 'training-sheet' || key === 'match-library' || key === 'match-sheet') {
+  if (key === 'calendar' || key === 'dashboard' || key === 'library' || key === 'training-sheet' || key === 'match-library' || key === 'match-workspace' || key === 'match-sheet') {
     await loadCalendarEvents()
   }
 
@@ -2471,7 +2577,7 @@ export async function attachAppEvents(user) {
     await loadAnalysisEntries()
   }
 
-  if (key === 'squad') {
+  if (key === 'squad' || key === 'callups') {
     await loadPlayerProfiles()
   }
 
@@ -2480,10 +2586,12 @@ export async function attachAppEvents(user) {
     calendar: calendarView,
     'training-sheet': trainingSheetEditorView,
     'match-library': matchLibraryView,
+    'match-workspace': matchWorkspaceView,
     'match-sheet': matchSheetEditorView,
     board: boardView,
     library: trainingLibraryView,
     squad: squadView,
+    callups: callupsView,
     analysis: analysisView,
     profile: profileView,
     settings: settingsView,
@@ -3120,12 +3228,12 @@ export async function attachAppEvents(user) {
         control.addEventListener(control.matches('input') ? 'input' : 'change', applyMatchFilters)
       })
       matchLibrary.addEventListener('click', async (event) => {
-        const openButton = event.target.closest('[data-open-match-sheet]')
+        const openButton = event.target.closest('[data-open-match-workspace]')
         if (openButton) {
-          localStorage.setItem('staff-active-match', JSON.stringify({ id: openButton.dataset.openMatchSheet, opponent: openButton.dataset.matchOpponent, date: openButton.dataset.matchDate }))
-          setActiveNavigation('match-sheet')
-          localStorage.setItem('nz-active-section', 'match-sheet')
-          await setView('match-sheet', 'Match Sheet Editor')
+          localStorage.setItem('staff-active-match', JSON.stringify({ id: openButton.dataset.openMatchWorkspace, opponent: openButton.dataset.matchOpponent, date: openButton.dataset.matchDate }))
+          setActiveNavigation('match-library')
+          localStorage.setItem('nz-active-section', 'match-workspace')
+          await setView('match-workspace', 'Match Workspace')
           return
         }
         const deleteButton = event.target.closest('[data-delete-library-match]')
@@ -3135,6 +3243,37 @@ export async function attachAppEvents(user) {
         }
       })
     }
+    const matchWorkspace = root.querySelector('[data-match-workspace], .match-workspace--empty')
+    matchWorkspace?.addEventListener('click', async (event) => {
+      const actionButton = event.target.closest('[data-workspace-action]')
+      if (!actionButton || actionButton.disabled) return
+      const action = actionButton.dataset.workspaceAction
+      if (action === 'match-library') {
+        setActiveNavigation('match-library')
+        localStorage.setItem('nz-active-section', 'match-library')
+        await setView('match-library', 'Match Library')
+        return
+      }
+      if (action === 'match-sheet') {
+        setActiveNavigation('match-library')
+        localStorage.setItem('nz-active-section', 'match-sheet')
+        await setView('match-sheet', 'Match Sheet Editor')
+        return
+      }
+      if (action === 'analysis') {
+        setActiveNavigation('match-library')
+        localStorage.setItem('nz-active-section', 'analysis')
+        await setView('analysis', 'Analisi gara')
+        return
+      }
+      if (action === 'callups') {
+        setActiveNavigation('match-library')
+        localStorage.setItem('nz-active-section', 'callups')
+        await setView('callups', 'Convocazioni')
+        root.querySelector('[data-callups-match]')?.focus()
+      }
+    })
+
     root.querySelector('[data-open-team-settings]')?.addEventListener('click', () => setView('team-settings', 'Identità squadra'))
 
     const teamSettingsForm = root.querySelector('[data-team-settings-form]')
@@ -5038,6 +5177,17 @@ export async function attachAppEvents(user) {
   }
 
   bindGlobalAccessGuard()
+
+  document
+    .querySelectorAll('[data-nav-group-toggle]')
+    .forEach((toggle) => {
+      toggle.addEventListener('click', () => {
+        const group = toggle.closest('[data-nav-group]')
+        const expanded = toggle.getAttribute('aria-expanded') !== 'false'
+        toggle.setAttribute('aria-expanded', String(!expanded))
+        group?.classList.toggle('is-collapsed', expanded)
+      })
+    })
 
   document
     .querySelectorAll('.nav-item')

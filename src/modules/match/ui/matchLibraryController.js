@@ -44,12 +44,12 @@ if (matchLibrary) {
     control.addEventListener(control.matches('input') ? 'input' : 'change', applyMatchFilters)
   })
   matchLibrary.addEventListener('click', async (event) => {
-    const openButton = event.target.closest('[data-open-match-sheet]')
+    const openButton = event.target.closest('[data-open-match-workspace]')
     if (openButton) {
-      storage.setItem('staff-active-match', JSON.stringify({ id: openButton.dataset.openMatchSheet, opponent: openButton.dataset.matchOpponent, date: openButton.dataset.matchDate }))
-      setActiveNavigation('match-sheet')
-      storage.setItem('nz-active-section', 'match-sheet')
-      await setView('match-sheet', 'Match Sheet Editor')
+      storage.setItem('staff-active-match', JSON.stringify({ id: openButton.dataset.openMatchWorkspace, opponent: openButton.dataset.matchOpponent, date: openButton.dataset.matchDate }))
+      setActiveNavigation('match-library')
+      storage.setItem('nz-active-section', 'match-workspace')
+      await setView('match-workspace', 'Match Workspace')
       return
     }
     const deleteButton = event.target.closest('[data-delete-library-match]')

@@ -1,6 +1,6 @@
 {
   "name": "staff-coach-portal",
-  "version": "0.12.4",
+  "version": "0.13.0-r2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,9 +9,10 @@
     "preview": "vite preview",
     "check:syntax": "node scripts/check-syntax.mjs",
     "check:architecture": "node scripts/validate-architecture.mjs",
-    "check": "npm run check:syntax && npm run check:architecture && npm run check:print && npm run check:match-calendar && npm run build",
+    "check": "npm run check:syntax && npm run check:architecture && npm run check:print && npm run check:match-calendar && npm run check:match-workspace && npm run build",
     "check:print": "node scripts/check-print-regression.mjs",
-    "check:match-calendar": "node scripts/check-match-calendar.mjs"
+    "check:match-calendar": "node scripts/check-match-calendar.mjs",
+    "check:match-workspace": "node scripts/check-match-workspace.mjs"
   },
   "devDependencies": {
     "supabase": "^2.111.0",
