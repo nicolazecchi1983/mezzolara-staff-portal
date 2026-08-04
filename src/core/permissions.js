@@ -7,7 +7,7 @@ import {
   firstAccessibleSection,
   getAccessPolicy,
   normalizeAccessRole,
-} from '../app/accessControl.js'
+} from './accessControl.js'
 
 let activeRole = ACCESS_ROLES.READ_ONLY
 

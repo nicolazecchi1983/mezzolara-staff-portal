@@ -5785,3 +5785,33 @@ body.document-viewer-open{overflow:hidden}
   .match-library-actions { justify-content: stretch; }
   .match-library-actions .button { flex: 1; }
 }
+
+
+/* A.12.1-R1 — Isolamento del Match Report dalle regole di stampa Training Sheet.
+   Le vecchie regole globali nascondono tutto tranne [data-ts-preview]; la pagina
+   dedicata assegna match-print-body anche a <html>, consentendo questo override. */
+@media print {
+  html.match-print-body,
+  body.match-print-body {
+    width: 210mm !important;
+    height: auto !important;
+    min-height: 297mm !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
+
+  body.match-print-body #printRoot,
+  body.match-print-body #printRoot * {
+    visibility: visible !important;
+  }
+
+  body.match-print-body #printRoot {
+    position: static !important;
+    display: block !important;
+    width: 100% !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+}

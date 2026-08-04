@@ -36,7 +36,7 @@ export function calendarEventToMatch(event, season = '') {
     venue: event.place,
     opponent: event.opponent || 'Da definire',
     status: new Date(event.startAt) < new Date() ? 'played' : 'scheduled',
-    documentStatus: 'Match Sheet disponibile',
+    documentStatus: event.matchReportStatus === 'completed' ? 'Report salvato' : 'Match Sheet disponibile',
   })
 }
 

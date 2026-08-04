@@ -1,12 +1,17 @@
 {
-  "name": "coach-portal-app",
-  "version": "0.0.0",
+  "name": "staff-coach-portal",
+  "version": "0.12.1-r2",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check:syntax": "node scripts/check-syntax.mjs",
+    "check:architecture": "node scripts/validate-architecture.mjs",
+    "check": "npm run check:syntax && npm run check:architecture && npm run check:print && npm run check:match-calendar && npm run build",
+    "check:print": "node scripts/check-print-regression.mjs",
+    "check:match-calendar": "node scripts/check-match-calendar.mjs"
   },
   "devDependencies": {
     "supabase": "^2.111.0",

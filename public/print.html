@@ -73,7 +73,9 @@
             document.head.prepend(base)
           }
           if (payload.styles) document.head.insertAdjacentHTML('beforeend', payload.styles)
-          document.body.className = payload.bodyClass || ''
+          const printClass = payload.bodyClass || ''
+          document.documentElement.className = printClass
+          document.body.className = printClass
           root.innerHTML = payload.content
           status.remove()
 

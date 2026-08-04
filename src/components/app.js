@@ -25,6 +25,7 @@ import { createPitchState, PITCH_POSITION_MODE } from '../shared/pitch/pitchStat
 import { createPitchController } from '../shared/pitch/pitchController.js'
 import { bindPitchTokenDragging } from '../shared/pitch/dragController.js'
 import { createMatchDraftService } from '../modules/match/matchService.js'
+import { createMatchCalendarService } from '../modules/match/matchCalendarService.js'
 import { createMatchLibraryService } from '../modules/match/matchLibraryService.js'
 import { getMatchOutcome } from '../modules/match/matchLibraryModel.js'
 import { normalizeScore } from '../modules/match/matchModel.js'
@@ -279,6 +280,8 @@ async function loadCalendarEvents() {
         matchType: event.match_type || (parsedNotes?.type === 'match_event' ? parsedNotes.match_type || null : null) || titleMatchData.matchType,
         opponent: event.opponent || (parsedNotes?.type === 'match_event' ? parsedNotes.opponent || '' : '') || titleMatchData.opponent,
         rawNotes: event.notes || null,
+        matchReportData: parsedNotes?.type === 'match_event' ? parsedNotes.match_report || null : null,
+        matchReportStatus: parsedNotes?.type === 'match_event' ? parsedNotes.report_status || null : null,
         restNote: parsedNotes?.type === 'rest_event' ? parsedNotes.rest_note || '' : '',
       }
     }),
@@ -621,7 +624,7 @@ function calendarCells() {
 
                   ${event.type === 'rest' ? '' : `<span>${event.time}${eventPlaceLabel(event)}</span>`}
                   ${event.type === 'training' ? `<small class="calendar-event-details">${event.matchDay || 'MD —'}${event.editorData?.focus ? ` · ${escapeHtml(event.editorData.focus)}` : ''}${event.trainingSheetPath ? ' · TS' : ''}</small>` : ''}
-                  ${event.type === 'match' && event.matchType ? `<small class="calendar-event-details">${escapeHtml(matchTypeLabel(event.matchType))}</small>` : ''}
+                  ${event.type === 'match' && event.matchType ? `<small class="calendar-event-details">${escapeHtml(matchTypeLabel(event.matchType))}${event.matchReportStatus === 'completed' ? ' · REPORT' : ''}</small>` : ''}
                 </button>
               `,
             )
@@ -3710,12 +3713,44 @@ export async function attachAppEvents(user) {
         dialog.addEventListener('click', (event) => { if (event.target === dialog) close() })
         dialog.addEventListener('keydown', (event) => { if (event.key === 'Escape') close() })
         dialog.querySelector('[data-close-match-report]')?.focus()
-        dialog.querySelector('[data-confirm-match-report]')?.addEventListener('click', () => {
+        dialog.querySelector('[data-confirm-match-report]')?.addEventListener('click', async (event) => {
+          const button = event.currentTarget
           const printable = dialog.querySelector('.match-report-paper')
+          const activeMatch = (() => {
+            try { return JSON.parse(localStorage.getItem('staff-active-match') || 'null') } catch { return null }
+          })()
+          button.disabled = true
+          button.textContent = 'Salvataggio nel Calendario…'
+          if (state) state.textContent = 'Collegamento al Calendario…'
           try {
+            const calendarService = createMatchCalendarService({
+              createEvent: createCalendarEvent,
+              updateEvent: updateCalendarEvent,
+              reloadEvents: loadCalendarEvents,
+            })
+            const saved = await calendarService.publish({
+              matchData: collect(),
+              activeMatch,
+              calendarEvents,
+            })
+            if (saved.eventId) {
+              localStorage.setItem('staff-active-match', JSON.stringify({
+                ...(activeMatch || {}),
+                id: saved.eventId,
+                opponent: form.elements.opponent?.value || activeMatch?.opponent || '',
+                date: form.elements.date?.value || activeMatch?.date || '',
+              }))
+            }
+            draftService.save(form)
+            if (state) state.textContent = saved.created ? 'Report salvato e gara creata nel Calendario' : 'Report salvato nel Calendario'
             printMatchReport(printable)
+            button.textContent = 'Stampa / salva PDF'
+            button.disabled = false
           } catch (error) {
-            if (state) state.textContent = error.message || 'Impossibile aprire la stampa'
+            console.error('Salvataggio Match Report nel Calendario non riuscito:', error)
+            if (state) state.textContent = error.message || 'Salvataggio nel Calendario non riuscito'
+            button.textContent = 'Riprova salvataggio'
+            button.disabled = false
           }
         })
       }
